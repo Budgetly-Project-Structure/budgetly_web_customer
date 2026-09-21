@@ -62,7 +62,7 @@
 
 ---
 
-## Jira Evidence Links (no screenshots)
+## Jira Evidence Links
 
 - **Sprint report link:** https://team3csci675.atlassian.net/jira/software/projects/SCRUM/boards/1/reports/burndown?source=overview
 - **Backlog link:** https://team3csci675.atlassian.net/jira/software/projects/SCRUM/boards/1/backlog
