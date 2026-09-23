@@ -1,0 +1,13 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-charcoal: #17191C;
+  --color-surface: #212528;
+  --color-line: #2C3033;
+  --color-green: #39D67A;
+  --color-greenDim: #1E4430;
+  --color-warn: #D9A441;
+  --color-textLight: #EBEEF0;
+  --color-textMuted: #8C9296;
+}
