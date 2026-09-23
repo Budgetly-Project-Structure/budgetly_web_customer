@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 
 /**
  * App shell: left sidebar navigation + persistent top bar.
@@ -79,6 +80,12 @@ export default function Layout({ children, activeNav = "dashboard", onNavigate }
                 aria-hidden="true"
               />
               <span className="text-sm text-textMuted">{syncStatus.label}</span>
+              <Link
+                to="/login"
+                className="text-sm text-green hover:underline ml-2"
+              >
+                Log in
+              </Link>
               <div className="w-8 h-8 rounded-full bg-surface border border-green text-textLight text-xs flex items-center justify-center font-medium ml-2">
                 JD
               </div>
