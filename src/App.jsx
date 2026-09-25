@@ -1,9 +1,15 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import Layout from "./components/Layout";
-import DashboardHome from "./components/DashboardHome";
 import Login from "./components/Login";
 import Signup from "./components/Signup";
 import ConsentScreen from "./components/ConsentScreen";
+import FinanceProvider from "./data/FinanceProvider";
+import HomePage from "./pages/HomePage";
+import TransactionsPage from "./pages/TransactionsPage";
+import BudgetPage from "./pages/BudgetPage";
+import InsightsPage from "./pages/InsightsPage";
+import ImportPage from "./pages/ImportPage";
+import SettingsPage from "./pages/SettingsPage";
 
 function LoginPage() {
   const navigate = useNavigate();
@@ -45,24 +51,29 @@ function ConsentPage() {
   );
 }
 
-function DashboardPage() {
-  return (
-    <Layout activeNav="dashboard">
-      <DashboardHome />
-    </Layout>
-  );
-}
-
 export default function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/signup" element={<SignupPage />} />
-        <Route path="/consent" element={<ConsentPage />} />
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <FinanceProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/consent" element={<ConsentPage />} />
+
+          {/* Everything inside the dashboard shell (sidebar + top bar).
+              TODO: wrap in a <RequireAuth> route once Firebase Auth is wired up. */}
+          <Route element={<Layout />}>
+            <Route index element={<HomePage />} />
+            <Route path="transactions" element={<TransactionsPage />} />
+            <Route path="budget" element={<BudgetPage />} />
+            <Route path="insights" element={<InsightsPage />} />
+            <Route path="import" element={<ImportPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </FinanceProvider>
     </BrowserRouter>
   );
 }

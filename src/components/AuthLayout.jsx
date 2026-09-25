@@ -4,7 +4,7 @@
  */
 export default function AuthLayout({ title, subtitle, children }) {
   return (
-    <div className="min-h-screen bg-charcoal flex items-center justify-center px-4 font-[Inter,system-ui,sans-serif] relative overflow-hidden">
+    <div className="min-h-screen bg-charcoal flex items-center justify-center px-4 font-sans relative overflow-hidden">
       <div
         className="pointer-events-none absolute inset-0"
         style={{
