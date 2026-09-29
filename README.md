@@ -1,49 +1,39 @@
-# Financial Planner — Frontend
+# Budgetly — Web (Customer)
 
-Web app for the CSCI 475 Team 3 Financial Planner: a budgeting app that imports bank statements, auto-categorizes transactions with AI, tracks budget progress, and answers natural-language questions about spending (e.g., "How much did I spend on coffee this month?").
+The customer-facing web app for Budgetly, a budgeting app that imports bank statements, auto-categorizes transactions with AI, tracks budget progress, and answers natural-language questions about spending.
 
-This repo holds the web frontend, project documentation, and sprint reports. Server-side code lives in the backend repo.
-
-## Related Repositories
+## Budgetly Repositories
 
 | Repo | Contents |
 |---|---|
-| **Frontend** (this repo) | React web app, project docs, sprint reports |
-| [Backend](https://github.com/zsheppard78/csci475---Team-3---Financial-App-backend) | Firebase Cloud Functions (Node.js), Firestore rules, API contract |
+| **budgetly_web_customer** (this repo) | Customer-facing React web app |
+| [budgetly_web_dash](https://github.com/zsheppard78/budgetly_web_dash) | Dashboard web app |
+| [budgetly_backend_nodejs](https://github.com/zsheppard78/budgetly_backend_nodejs) | Firebase Cloud Functions (Node.js), Firestore rules |
+| [budgetly_contracts](https://github.com/zsheppard78/budgetly_contracts) | Interfaces: data schemas, API definitions, AI interface |
+| [budgetly_assets](https://github.com/zsheppard78/budgetly_assets) | Docs, images, reports |
 
-The backend's API contract file defines every function's inputs, outputs, and data shapes. The frontend builds against it.
+This app builds against the interfaces in **budgetly_contracts**. Any change to data shapes or API calls starts there.
 
 ## Tech Stack
 
 - **React** (JavaScript) with **Vite**
-- **React Router**: page navigation
-- **Firebase**: Auth, Firestore, and Hosting
+- **Tailwind CSS**
+- **Firebase**: Auth, Firestore, Hosting
 
 ## Structure
 
 ```
 src/
   components/     React components (layout, auth, dashboard, consent screen)
-  assets/         Images and icons used by the app
   App.jsx         Root component
   main.jsx        Entry point
+  index.css       Global styles
 public/           Static files served as-is
-assets/docs/      Project documentation
-mobile/           Mobile app (framework not yet finalized)
 index.html        App shell
 vite.config.js    Build configuration
-Sprint-*.md       Sprint Jira and Git reports
 ```
 
-## Documentation
-
-Design and planning docs are in [`assets/docs`](assets/docs):
-
-- `system-architecture.md`: overall system design
-- `data-model.md`: Firestore data structure
-- `ui-constraints.md`: UI/UX rules for web and mobile
-- `ai-integration-plan.md`: AI categorization and insights plan
-- `projectOverviewPresentation.md`: project scope and overview
+Sprint 1 reports are kept at the repo root. Reports from Sprint 2 onward live in **budgetly_assets**.
 
 ## Local Setup
 
@@ -54,7 +44,7 @@ npm install
 npm run dev
 ```
 
-Then open the `Local:` link printed in the terminal (usually http://localhost:5173).
+Open the `Local:` link printed in the terminal (usually http://localhost:5173).
 
 Build for production:
 
