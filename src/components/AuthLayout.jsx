@@ -16,7 +16,7 @@ export default function AuthLayout({ title, subtitle, children }) {
 
       <div className="w-full max-w-sm relative">
         <div className="flex items-center justify-center gap-2 mb-8">
-          <span className="font-mono text-lg font-semibold text-green">Ledger</span>
+          <span className="font-mono text-lg font-semibold text-green">Budgetly</span>
         </div>
 
         <div className="bg-surface border border-line rounded-lg p-8 shadow-[0_8px_32px_rgba(0,0,0,0.4)]">

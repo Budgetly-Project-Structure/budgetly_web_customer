@@ -49,7 +49,7 @@ function SidebarContents({ onNavigate }) {
     <>
       <div className="h-16 flex items-center px-6 border-b border-line shrink-0">
         <Link to="/" onClick={onNavigate} className="font-mono text-sm tracking-tight font-semibold text-green">
-          Ledger
+          Budgetly
         </Link>
       </div>
       <nav className="flex-1 flex flex-col px-3 py-6" aria-label="Main">
@@ -132,7 +132,7 @@ export default function Layout() {
           >
             <Icon name="menu" className="w-5 h-5" />
           </button>
-          <span className="md:hidden font-mono text-sm font-semibold text-green">Ledger</span>
+          <span className="md:hidden font-mono text-sm font-semibold text-green">Budgetly</span>
           <div className="flex-1" />
 
           <div className="hidden sm:flex items-center gap-2 text-sm text-textMuted">
