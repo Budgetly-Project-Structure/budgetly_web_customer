@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment variables (firebase keys)
+.env
+
+#Firebase hosting cache
+.firebase/

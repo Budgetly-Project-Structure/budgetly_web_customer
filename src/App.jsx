@@ -10,14 +10,18 @@ import BudgetPage from "./pages/BudgetPage";
 import InsightsPage from "./pages/InsightsPage";
 import ImportPage from "./pages/ImportPage";
 import SettingsPage from "./pages/SettingsPage";
+import { signUp, logIn, saveConsent } from "./lib/auth";
 
+/**
+ * Login route. Signs the user in with Firebase Auth, then goes to the dashboard.
+ * If logIn throws, Login.jsx catches it and shows the error message.
+ */
 function LoginPage() {
   const navigate = useNavigate();
   return (
     <Login
       onSubmit={async ({ email, password }) => {
-        // TODO: await signInWithEmailAndPassword(auth, email, password)
-        console.log("login", email, password);
+        await logIn({ email, password });
         navigate("/");
       }}
       onSwitchToSignup={() => navigate("/signup")}
@@ -25,13 +29,16 @@ function LoginPage() {
   );
 }
 
+/**
+ * Signup route. Creates the Firebase Auth account and the users/{uid}
+ * Firestore document, then sends the new user to the consent screen.
+ */
 function SignupPage() {
   const navigate = useNavigate();
   return (
     <Signup
-      onSubmit={async ({ name, email, password }) => {
-        // TODO: await createUserWithEmailAndPassword(auth, email, password)
-        console.log("signup", name, email, password);
+      onSubmit={async (form) => {
+        await signUp(form);
         navigate("/consent");
       }}
       onSwitchToLogin={() => navigate("/login")}
@@ -39,12 +46,16 @@ function SignupPage() {
   );
 }
 
+/**
+ * Consent route. Saves consentGiven: true and a timestamp to the
+ * user's Firestore profile, then goes to the dashboard.
+ */
 function ConsentPage() {
   const navigate = useNavigate();
   return (
     <ConsentScreen
-      onContinue={() => {
-        // TODO: write consentedAt timestamp to the user's Firestore profile
+      onContinue={async () => {
+        await saveConsent();
         navigate("/");
       }}
     />
@@ -61,7 +72,7 @@ export default function App() {
           <Route path="/consent" element={<ConsentPage />} />
 
           {/* Everything inside the dashboard shell (sidebar + top bar).
-              TODO: wrap in a <RequireAuth> route once Firebase Auth is wired up. */}
+              TODO: wrap in a <RequireAuth> route so logged-out users are sent to /login. */}
           <Route element={<Layout />}>
             <Route index element={<HomePage />} />
             <Route path="transactions" element={<TransactionsPage />} />
