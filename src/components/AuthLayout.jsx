@@ -43,7 +43,7 @@ export default function AuthLayout({ title, subtitle, children }) {
       <div className="w-full max-w-sm relative">
         {/* App wordmark shown above the card. */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          <span className="font-mono text-lg font-semibold text-green">Ledger</span>
+          <span className="font-mono text-lg font-semibold text-green">Budgetly</span>
         </div>
 
         {/* The card itself. Each auth screen's content is rendered inside it. */}

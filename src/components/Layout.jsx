@@ -102,7 +102,7 @@ function SidebarContents({ onNavigate }) {
       {/* Logo row. Same height (h-16) as the top bar, so their borders line up. */}
       <div className="h-16 flex items-center px-6 border-b border-line shrink-0">
         <Link to="/" onClick={onNavigate} className="font-mono text-sm tracking-tight font-semibold text-green">
-          Ledger
+          Budgetly
         </Link>
       </div>
 
@@ -228,7 +228,7 @@ export default function Layout() {
           </button>
 
           {/* Logo. Mobile only, since on desktop it's already in the sidebar. */}
-          <span className="md:hidden font-mono text-sm font-semibold text-green">Ledger</span>
+          <span className="md:hidden font-mono text-sm font-semibold text-green">Budgetly</span>
 
           {/* Spacer that pushes everything after it to the right edge. */}
           <div className="flex-1" />
