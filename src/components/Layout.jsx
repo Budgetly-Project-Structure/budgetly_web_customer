@@ -19,10 +19,11 @@
  * Part of: Account & Onboarding epic, dashboard shell (Sprint 2)
  */
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import Icon from "./Icon";
 import { useFinance } from "../data/FinanceContext";
 import { formatDateTime } from "../lib/format";
+import { logOut} from "../lib/auth";
 
 /**
  * Main navigation links, shown at the top of the sidebar in this order.
@@ -97,6 +98,7 @@ function NavItem({ item, onClick }) {
  *                                      sidebar doesn't pass it.
  */
 function SidebarContents({ onNavigate }) {
+  const navigate = useNavigate();
   return (
     <>
       {/* Logo row. Same height (h-16) as the top bar, so their borders line up. */}
@@ -122,17 +124,20 @@ function SidebarContents({ onNavigate }) {
           ))}
 
           {/* Log out.
-              NOTE: This only goes to the /login page. It does NOT sign the user
-              out of Firebase, so they are still authenticated.
-              TODO: Call Firebase `signOut(auth)` first, then navigate to /login. */}
-          <Link
-            to="/login"
-            onClick={onNavigate}
-            className="flex items-center gap-3 px-3 py-2 rounded-md text-sm text-textMuted hover:text-textLight hover:bg-raised transition-colors"
+              Signs the user out of Firebase first, so the session really ends
+              (important on shared computers), then goes to the login page. */}
+          <button
+            type="button"
+            onClick={async () => {
+              await logOut();
+              onNavigate?.();
+              navigate("/login");
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-textMuted hover:text-textLight hover:bg-raised transition-colors"
           >
             <Icon name="logout" className="w-4 h-4" />
             Log out
-          </Link>
+          </button>
         </div>
       </nav>
     </>

@@ -3,6 +3,7 @@ import Layout from "./components/Layout";
 import Login from "./components/Login";
 import Signup from "./components/Signup";
 import ConsentScreen from "./components/ConsentScreen";
+import RequireAuth from "./components/RequireAuth";
 import FinanceProvider from "./data/FinanceProvider";
 import HomePage from "./pages/HomePage";
 import TransactionsPage from "./pages/TransactionsPage";
@@ -47,8 +48,8 @@ function SignupPage() {
 }
 
 /**
- * Consent route. Saves consentGiven: true and a timestamp to the
- * user's Firestore profile, then goes to the dashboard.
+ * Consent route. Saves a consentAcceptedAt timestamp to the user's
+ * Firestore profile, then goes to the dashboard.
  */
 function ConsentPage() {
   const navigate = useNavigate();
@@ -67,19 +68,22 @@ export default function App() {
     <BrowserRouter>
       <FinanceProvider>
         <Routes>
+          {/* Public routes: anyone can open these */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/consent" element={<ConsentPage />} />
 
-          {/* Everything inside the dashboard shell (sidebar + top bar).
-              TODO: wrap in a <RequireAuth> route so logged-out users are sent to /login. */}
-          <Route element={<Layout />}>
-            <Route index element={<HomePage />} />
-            <Route path="transactions" element={<TransactionsPage />} />
-            <Route path="budget" element={<BudgetPage />} />
-            <Route path="insights" element={<InsightsPage />} />
-            <Route path="import" element={<ImportPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+          {/* Protected routes: RequireAuth sends logged-out users to /login.
+              Everything inside renders in the dashboard shell (sidebar + top bar). */}
+          <Route element={<RequireAuth />}>
+            <Route element={<Layout />}>
+              <Route index element={<HomePage />} />
+              <Route path="transactions" element={<TransactionsPage />} />
+              <Route path="budget" element={<BudgetPage />} />
+              <Route path="insights" element={<InsightsPage />} />
+              <Route path="import" element={<ImportPage />} />
+              <Route path="settings" element={<SettingsPage />} />
+            </Route>
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
