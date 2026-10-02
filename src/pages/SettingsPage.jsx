@@ -1,3 +1,16 @@
+/**
+ * SettingsPage.jsx
+ *
+ * The "/settings" page:
+ *   - Profile: change your display name (email is read-only)
+ *   - Accounts: the bank accounts you've imported, with masked numbers (•••• 4521)
+ *   - Data permissions: switches for the same three permissions as the consent screen
+ *   - Danger zone: "Delete my data" with a confirm step
+ *
+ * Current limitation: everything here only changes local state. The TODOs mark
+ * the Firebase calls still to be added (update the name in Auth + Firestore,
+ * save the permission toggles, and a deleteUserData Cloud Function).
+ */
 import { useState } from "react";
 import { Card, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
@@ -10,6 +23,14 @@ const PERMISSIONS = [
   { key: "aiCategorization", label: "AI categorization", detail: "Merchant, amount and date are sent to the AI model." },
 ];
 
+/**
+ * An on/off switch. role="switch" + aria-checked make screen readers
+ * announce it as a switch that is on or off.
+ *
+ * @param {boolean} checked
+ * @param {(value: boolean) => void} onChange
+ * @param {string} label  Read aloud by screen readers
+ */
 function Toggle({ checked, onChange, label }) {
   return (
     <button
@@ -30,13 +51,17 @@ function Toggle({ checked, onChange, label }) {
   );
 }
 
+/** Settings page component. */
 export default function SettingsPage() {
   const { profile, setProfile, accounts } = useFinance();
+  // name = what's typed in the Name box; saved = shows the "Saved" chip for 2 seconds;
+  // perms = the three permission switches; confirmDelete = second step of the delete button
   const [name, setName] = useState(profile.displayName);
   const [saved, setSaved] = useState(false);
   const [perms, setPerms] = useState({ statementData: true, storage: true, aiCategorization: true });
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  // "Save changes" is only enabled when the name actually changed
   const dirty = name.trim() !== profile.displayName;
 
   return (

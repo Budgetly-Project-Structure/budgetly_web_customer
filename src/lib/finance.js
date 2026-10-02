@@ -1,15 +1,30 @@
 // Pure calculations over transactions/budgets. No React here so these are easy to unit test.
 
+// Conventions used throughout:
+//   - amount < 0 is spending, amount > 0 is income
+//   - month is a "YYYY-MM" string and txn.date is "YYYY-MM-DD", so a startsWith() check finds a month
+
+// If the AI is less than 70% sure of a category, the transaction is flagged for review
 export const LOW_CONFIDENCE = 0.7;
 
+/** True if the transaction is in the given month ("2026-09"). */
 export function inMonth(txn, month) {
   return txn.date.startsWith(month);
 }
 
+/**
+ * True if a transaction should be checked by the user: it's uncategorized, or
+ * the AI's confidence is under LOW_CONFIDENCE. Once the user picks a
+ * category themselves, it never needs review again.
+ */
 export function needsReview(txn) {
   return !txn.isUserCorrected && (txn.category === "uncategorized" || txn.categoryConfidence < LOW_CONFIDENCE);
 }
 
+/**
+ * Adds up a month's money in and out.
+ * @returns {{income: number, spending: number, net: number}} spending is a positive number
+ */
 export function monthTotals(transactions, month) {
   let income = 0;
   let spending = 0;
@@ -31,12 +46,18 @@ export function spendingByCategory(transactions, month) {
   return out;
 }
 
+// What each budget status looks like: label + icon (so it never relies on color alone)
+// and the Tailwind classes for its text, progress bar and chip.
 export const BUDGET_STATUS = {
   over: { label: "Over budget", icon: "x", text: "text-danger", bar: "bg-danger", chip: "bg-danger/10 text-danger border-danger/40" },
   near: { label: "Near limit", icon: "alert", text: "text-warn", bar: "bg-warn", chip: "bg-warn/10 text-warn border-warn/40" },
   ok: { label: "On track", icon: "check", text: "text-green", bar: "bg-green", chip: "bg-greenDim text-green border-green/40" },
 };
 
+/**
+ * "over" if spent is more than the limit, "near" at 85% or more, otherwise "ok".
+ * A budget with no limit counts as "ok".
+ */
 export function budgetStatus(spent, limit) {
   if (!limit) return "ok";
   const pct = spent / limit;
@@ -47,6 +68,8 @@ export function budgetStatus(spent, limit) {
 
 /** Budgets joined with actual spend for the month. */
 export function budgetRows(budgets, transactions, month, categories) {
+  // Each budget row gets: its category object, spent, remaining (negative = over),
+  // pct (% of limit used) and status
   const spent = spendingByCategory(transactions, month);
   return budgets
     .filter((b) => b.month === month)
@@ -68,11 +91,15 @@ export function budgetRows(budgets, transactions, month, categories) {
  * same output shape ({ id, tone, title, body }) so the UI won't change when that lands.
  */
 export function generateInsights(transactions, month, prevMonth, categories, budgets) {
+  // Spending per category this month and last month
   const cur = spendingByCategory(transactions, month);
   const prev = spendingByCategory(transactions, prevMonth);
   const label = (id) => categories.find((c) => c.id === id)?.label ?? id;
   const insights = [];
 
+  // Insight 1 and 2: compare each category to last month. Categories under $20
+  // last month are skipped, because a small base makes the % change misleading.
+  // Sorted from biggest increase to biggest decrease.
   // Biggest % increase / decrease vs last month (ignore tiny categories)
   const changes = Object.keys({ ...cur, ...prev })
     .filter((id) => id !== "uncategorized" && (prev[id] || 0) >= 20 && (cur[id] || 0) >= 0)
@@ -98,6 +125,7 @@ export function generateInsights(transactions, month, prevMonth, categories, bud
     });
   }
 
+  // Insight 3: the merchant visited most this month (only if 3+ visits)
   // Top merchant by frequency
   const counts = {};
   for (const t of transactions) {
@@ -116,6 +144,7 @@ export function generateInsights(transactions, month, prevMonth, categories, bud
     });
   }
 
+  // Insight 4: list every category that's over budget
   // Over-budget categories
   const over = budgetRows(budgets, transactions, month, categories).filter((r) => r.status === "over");
   if (over.length) {
@@ -135,6 +164,12 @@ export function generateInsights(transactions, month, prevMonth, categories, bud
  * natural-language query Cloud Function. Returns null if it can't answer.
  */
 export function answerSpendingQuestion(question, transactions, month, categories) {
+  // Tried in this order; the first match wins:
+  //   1. A category name in the question ("dining", "groceries"). "restaurant",
+  //      "eating out" and "food" also count as dining.
+  //   2. A nickname: coffee → Starbucks, gas → Shell/QuikTrip, amazon → Amazon
+  //   3. The first word of a merchant name ("target" matches "Target T-1123")
+  // Only this month's spending is searched. Returns { total, count, subject }.
   const q = question.toLowerCase();
   const monthTx = transactions.filter((t) => inMonth(t, month) && t.amount < 0);
 

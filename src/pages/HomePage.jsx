@@ -1,3 +1,20 @@
+/**
+ * HomePage.jsx
+ *
+ * The dashboard ("/"), the first page a signed-in user sees. It shows:
+ *   1. Headline: how much of this month's total budget is spent, with a progress bar
+ *   2. Four summary tiles: income, spending (vs last month), net, and "needs review"
+ *   3. "Budgets to watch": the 5 budgets closest to (or over) their limit
+ *   4. The top insight and a nudge to review low-confidence categories
+ *   5. The 6 most recent transactions this month
+ *
+ * Data: everything comes from useFinance() (FinanceProvider). Right now that is
+ * mock data; when it switches to Firestore this page won't need to change.
+ * All the math lives in lib/finance.js so this file only handles display.
+ *
+ * New user with no transactions → shows an empty state pointing to /import
+ * (ui-constraints.md: design the empty state up front).
+ */
 import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
 import { Card, CategoryIcon, EmptyState, StatusChip, buttonStyles } from "../components/ui";
@@ -5,6 +22,14 @@ import { useFinance } from "../data/FinanceContext";
 import { BUDGET_STATUS, budgetRows, generateInsights, monthTotals, needsReview } from "../lib/finance";
 import { formatAmount, formatCurrency, formatDate, formatMonth } from "../lib/format";
 
+/**
+ * One small stat card in the summary row.
+ *
+ * @param {string} label    Small caption, e.g. "Income"
+ * @param {string} value    The big number, already formatted
+ * @param {string} [sub]    Optional line under the number
+ * @param {"muted"|"good"|"warn"} [subTone]  Color of the sub line
+ */
 function SummaryTile({ label, value, sub, subTone = "muted" }) {
   const tones = { muted: "text-textMuted", good: "text-green", warn: "text-warn" };
   return (
@@ -16,9 +41,11 @@ function SummaryTile({ label, value, sub, subTone = "muted" }) {
   );
 }
 
+/** Dashboard page component. */
 export default function HomePage() {
   const { transactions, budgets, categories, currentMonth, previousMonth, profile } = useFinance();
 
+  // Brand-new user: nothing imported yet, so show the "import your first statement" card
   if (transactions.length === 0) {
     return (
       <Card>
@@ -36,18 +63,24 @@ export default function HomePage() {
     );
   }
 
+  // --- Numbers for the headline and summary tiles ---
+  // totals / prevTotals = { income, spending, net } for this month and last month
   const totals = monthTotals(transactions, currentMonth);
   const prevTotals = monthTotals(transactions, previousMonth);
+  // One row per budget with spent, remaining, % used and status (see lib/finance.js)
   const rows = budgetRows(budgets, transactions, currentMonth, categories);
+  // Headline numbers only count spending in categories that HAVE a budget
   const totalBudget = rows.reduce((s, r) => s + r.limit, 0);
   const budgetedSpent = rows.reduce((s, r) => s + r.spent, 0);
   const pctUsed = totalBudget ? (budgetedSpent / totalBudget) * 100 : 0;
   const leftToSpend = totalBudget - budgetedSpent;
 
+  // Newest 6 transactions this month (ISO dates sort correctly as strings)
   const recent = transactions
     .filter((t) => t.date.startsWith(currentMonth))
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 6);
+  // Counts for the tile sub-lines
   const depositCount = transactions.filter((t) => t.date.startsWith(currentMonth) && t.amount > 0).length;
   const reviewCount =transactions.filter((t) => t.date.startsWith(currentMonth) && needsReview(t)).length;
 
@@ -56,8 +89,10 @@ export default function HomePage() {
     .sort((a, b) => b.pct - a.pct)
     .slice(0, 5);
 
+  // Only the first (most important) insight is shown here; /insights shows all of them
   const insight = generateInsights(transactions, currentMonth, previousMonth, categories, budgets)[0];
   const catById = (id) => categories.find((c) => c.id === id);
+  // % change in spending vs last month (0 if last month had no spending, to avoid dividing by 0)
   const spendChange = prevTotals.spending ? ((totals.spending - prevTotals.spending) / prevTotals.spending) * 100 : 0;
 
   return (
@@ -74,6 +109,7 @@ export default function HomePage() {
           <span className="text-sm text-textMuted">of {formatCurrency(totalBudget)} budgeted</span>
         </div>
         <div className="mt-3 max-w-md">
+          {/* Progress bar: red over 100%, amber at 85%+, green otherwise. Width is capped at 100% */}
           <div className="h-2 rounded-full bg-surface border border-line overflow-hidden">
             <div
               className={`h-full rounded-full ${pctUsed > 100 ? "bg-danger" : pctUsed >= 85 ? "bg-warn" : "bg-green"}`}
@@ -89,6 +125,7 @@ export default function HomePage() {
 
       {/* Summary tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Spending going UP is shown as a warning; going down is good */}
         <SummaryTile label="Income" value={formatCurrency(totals.income)} sub={`${depositCount} deposit${depositCount === 1 ? "" : "s"}`} />
         <SummaryTile
           label="Spending"
@@ -123,6 +160,7 @@ export default function HomePage() {
         >
           <ul className="space-y-4">
             {watchList.map((r) => {
+              // s = label, icon and colors for this budget's status ("over" / "near" / "ok")
               const s = BUDGET_STATUS[r.status];
               return (
                 <li key={r.id} className="flex items-center gap-3">
@@ -138,6 +176,8 @@ export default function HomePage() {
                       <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${Math.min(100, r.pct)}%` }} />
                     </div>
                   </div>
+                  {/* Wide screens show the full status chip; phones show just the icon
+                      (with screen-reader text) so the row doesn't overflow */}
                   <span className="hidden sm:flex w-28 justify-end">
                     <StatusChip tone={r.status === "over" ? "danger" : r.status === "near" ? "warn" : "ok"} icon={s.icon}>
                       {s.label}
@@ -169,6 +209,7 @@ export default function HomePage() {
               </div>
             </Card>
           )}
+          {/* Only shown when some transactions have a low-confidence or missing category */}
           {reviewCount > 0 && (
             <Card>
               <div className="pt-5 flex items-start gap-3">
