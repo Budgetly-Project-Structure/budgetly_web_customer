@@ -33,8 +33,9 @@ export function formatMonth(month) {
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
+/** "•••• 4521", or "" when the account is unknown (e.g. a statement uploaded without one). */
 export function maskAccount(last4) {
-  return `•••• ${last4}`;
+  return last4 ? `•••• ${last4}` : "";
 }
 
 export function formatPercent(n) {

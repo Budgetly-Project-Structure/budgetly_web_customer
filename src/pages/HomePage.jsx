@@ -17,8 +17,28 @@ function SummaryTile({ label, value, sub, subTone = "muted" }) {
 }
 
 export default function HomePage() {
-  const { transactions, budgets, categories, currentMonth, previousMonth, profile } = useFinance();
+  const { transactions, transactionsLoading, transactionsError, budgets, categories, currentMonth, previousMonth, profile } =
+    useFinance();
 
+  // Waiting for the first snapshot from Firestore: don't flash "no data yet"
+  if (transactionsLoading) {
+    return (
+      <p className="py-16 text-center text-sm text-textMuted" role="status">
+        Loading your transactions…
+      </p>
+    );
+  }
+
+  // Couldn't read from Firestore: say so, rather than telling a user with data to import
+  if (transactionsError) {
+    return (
+      <Card>
+        <EmptyState icon="alert" title="We couldn't load your transactions" body={transactionsError} />
+      </Card>
+    );
+  }
+
+  // New user, nothing imported yet
   if (transactions.length === 0) {
     return (
       <Card>

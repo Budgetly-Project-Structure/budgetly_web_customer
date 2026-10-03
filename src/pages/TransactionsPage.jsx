@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import Icon from "../components/Icon";
 import { Card, CategoryIcon, EmptyState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
@@ -55,7 +55,8 @@ function SortHeader({ label, field, sort, setSort, align = "left" }) {
 }
 
 export default function TransactionsPage() {
-  const { transactions, categories, accounts, currentMonth, previousMonth, updateTransactionCategory } = useFinance();
+  const { transactions, transactionsLoading, transactionsError, categories, accounts, currentMonth, previousMonth, updateTransactionCategory } =
+    useFinance();
   const [params, setParams] = useSearchParams();
 
   const [query, setQuery] = useState("");
@@ -104,6 +105,36 @@ export default function TransactionsPage() {
     setType("all");
     setReviewOnly(false);
   };
+
+  // Loading / error / "no data yet" come before the filters: with nothing imported,
+  // search and filters have nothing to work on. (All hooks above run on every render.)
+  if (transactionsLoading || transactionsError || transactions.length === 0) {
+    return (
+      <div>
+        <PageHeader title="Transactions" description="Everything from your imported statements." />
+        <Card>
+          {transactionsLoading ? (
+            <p className="py-12 text-center text-sm text-textMuted" role="status">
+              Loading your transactions…
+            </p>
+          ) : transactionsError ? (
+            <EmptyState icon="alert" title="We couldn't load your transactions" body={transactionsError} />
+          ) : (
+            <EmptyState
+              icon="upload"
+              title="No transactions yet"
+              body="Import a CSV or PDF bank statement and your transactions will show up here."
+              action={
+                <Link to="/import" className={buttonStyles.primary}>
+                  Import a statement
+                </Link>
+              }
+            />
+          )}
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div>
