@@ -1,3 +1,20 @@
+/**
+ * FinanceProvider.jsx
+ *
+ * The single place the web app's financial data lives. App.jsx wraps every
+ * route in <FinanceProvider>, and pages read from it with useFinance().
+ *
+ * What it provides:
+ *   Data:    categories, accounts, currentMonth, previousMonth,
+ *            transactions, budgets, statements (import history), profile, lastImport
+ *   Actions: updateTransactionCategory, setBudgetLimit, removeBudget,
+ *            addStatement, updateStatement, removeStatement, setProfile
+ *
+ * Transactions and import history are live from Firestore (onSnapshot).
+ * Budgets and profile still start as mock data and live in React state, so
+ * changes to those are lost on refresh. The plan is to swap them for Firestore
+ * here too; the pages won't need to change.
+ */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
@@ -73,9 +90,10 @@ function loadDismissed(uid) {
 }
 
 /**
- * Holds app data in memory for now. Each updater has a TODO showing the Firestore
- * call it will become — page components only talk to this provider, so swapping the
- * data source later won't touch the pages.
+ * Transactions and imports come from Firestore; budgets and profile are still in
+ * memory (their updaters have a TODO showing the Firestore call they will become).
+ * Page components only talk to this provider, so swapping the data source later
+ * won't touch the pages.
  */
 export default function FinanceProvider({ children }) {
   const [serverTransactions, setServerTransactions] = useState(null); // null = still loading
@@ -90,6 +108,10 @@ export default function FinanceProvider({ children }) {
   const [uid, setUid] = useState(null);
   const [profile, setProfile] = useState(PROFILE);
 
+  /**
+   * Sets this month's limit for a category: updates the budget if it exists,
+   * otherwise creates a new one.
+   */
   const setBudgetLimit = useCallback((categoryId, limit) => {
     // TODO: setDoc(doc(db, "budgets", `${uid}_${categoryId}_${CURRENT_MONTH}`), { ... }, { merge: true })
     setBudgets((prev) => {
@@ -177,16 +199,19 @@ export default function FinanceProvider({ children }) {
     );
   }, [uid]);
 
-  // A file being uploaded from this browser. It shows up instantly; once the
+  // A file being uploaded from this browser shows up instantly; once the
   // server's import doc for the same file arrives, the server's version replaces it.
+  /** Adds a row to the top of Import history (ImportPage calls this when an upload starts). */
   const addStatement = useCallback((statement) => {
     setPendingUploads((prev) => [statement, ...prev]);
   }, []);
 
+  /** Changes fields on one Import history row, e.g. { status: "uploaded" }. */
   const updateStatement = useCallback((id, patch) => {
     setPendingUploads((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
   }, []);
 
+  /** Removes a row from Import history (server imports are hidden, not deleted). */
   const removeStatement = useCallback(
     (id) => {
       setPendingUploads((prev) => prev.filter((s) => s.id !== id));

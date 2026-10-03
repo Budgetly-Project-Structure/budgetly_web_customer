@@ -1,3 +1,17 @@
+/**
+ * InsightsPage.jsx
+ *
+ * The "/insights" page. Three parts:
+ *   1. "Ask a question" box: plain-English questions like "How much did I spend on coffee?"
+ *   2. Insight cards: short findings such as "Dining is up 40%" or "2 categories over budget"
+ *   3. A chart comparing spending per category, this month vs last month
+ *      (with a button to switch to a table)
+ *
+ * The questions and insights are currently answered by simple rules in
+ * lib/finance.js (answerSpendingQuestion, generateInsights). They are stand-ins
+ * for the planned AI Cloud Functions and return the same shape, so this page
+ * won't need to change when the AI version is plugged in.
+ */
 import { useState } from "react";
 import Icon from "../components/Icon";
 import { Card, PageHeader, buttonStyles, inputStyles } from "../components/ui";
@@ -5,12 +19,14 @@ import { useFinance } from "../data/FinanceContext";
 import { answerSpendingQuestion, generateInsights, spendingByCategory } from "../lib/finance";
 import { formatCurrency, formatMonth } from "../lib/format";
 
+// How each insight "tone" looks: an icon + color. "warn" = spending went up, "good" = went down.
 const TONE = {
   warn: { icon: "arrowUp", cls: "text-warn" },
   good: { icon: "arrowDown", cls: "text-green" },
   neutral: { icon: "sparkle", cls: "text-textMuted" },
 };
 
+// Example questions shown as clickable chips under the search box
 const EXAMPLES = [
   "How much did I spend on coffee?",
   "How much on groceries?",
@@ -22,7 +38,10 @@ const EXAMPLES = [
  * Two series → legend + value labels so identity never relies on color alone.
  */
 function CategoryComparisonChart({ rows, currentLabel, previousLabel }) {
+  // Which category row the mouse is over (shows a tooltip with exact numbers)
   const [hover, setHover] = useState(null);
+  // Largest value across both months. Every bar's width is relative to this one.
+  // Math.max(1, ...) avoids dividing by zero if there's no spending.
   const max = Math.max(1, ...rows.flatMap((r) => [r.current, r.previous]));
 
   return (
@@ -54,6 +73,8 @@ function CategoryComparisonChart({ rows, currentLabel, previousLabel }) {
                   <div key={i} className="flex items-center gap-2 h-3.5">
                     <div
                       className={`h-full rounded-r ${s.cls}`}
+                      // Bars use at most 85% of the width so the $ label fits beside them.
+                      // Any non-zero amount gets at least 3px so it doesn't disappear.
                       style={{ width: `${(s.v / max) * 85}%`, minWidth: s.v > 0 ? 3 : 0 }}
                     />
                     <span className="font-mono text-[11px] text-textMuted tabular-nums">{formatCurrency(s.v)}</span>
@@ -82,13 +103,18 @@ function CategoryComparisonChart({ rows, currentLabel, previousLabel }) {
   );
 }
 
+/** Insights page component. */
 export default function InsightsPage() {
   const { transactions, categories, budgets, currentMonth, previousMonth } = useFinance();
+  // question = text in the box; answer = { q, res } for the last question asked;
+  // showTable = chart vs table view
   const [question, setQuestion] = useState("");
   const [answer, setAnswer] = useState(null);
   const [showTable, setShowTable] = useState(false);
 
   const insights = generateInsights(transactions, currentMonth, previousMonth, categories, budgets);
+  // Spending per category for both months → rows for the chart/table.
+  // Income is skipped, as are categories with no spending in either month. Biggest first.
   const cur = spendingByCategory(transactions, currentMonth);
   const prev = spendingByCategory(transactions, previousMonth);
   const chartRows = categories
@@ -96,9 +122,14 @@ export default function InsightsPage() {
     .map((c) => ({ id: c.id, label: c.label, current: cur[c.id] || 0, previous: prev[c.id] || 0 }))
     .sort((a, b) => b.current - a.current);
 
+  // Month names only, e.g. "September", for the legend and column headers
   const currentLabel = formatMonth(currentMonth).split(" ")[0];
   const previousLabel = formatMonth(previousMonth).split(" ")[0];
 
+  /**
+   * Answers a question. Called by the form (uses the typed text) or by an
+   * example chip (passes its text in q). res is null if no category or merchant matched.
+   */
   function ask(q) {
     const text = (q ?? question).trim();
     if (!text) return;

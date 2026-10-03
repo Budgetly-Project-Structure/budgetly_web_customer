@@ -8,9 +8,13 @@
  *  - account numbers are only ever stored masked (last 4)
  */
 
+// The app treats September 2026 as "this month" and August as "last month".
+// Once real data is in, these will come from today's date instead.
 export const CURRENT_MONTH = "2026-09";
 export const PREVIOUS_MONTH = "2026-08";
 
+// The fixed list of spending categories. id is what's stored on a transaction;
+// label is shown in the UI; icon matches a name in components/Icon.jsx; color is for charts.
 export const CATEGORIES = [
   { id: "dining", label: "Dining Out", icon: "dining", color: "#E08A5B" },
   { id: "groceries", label: "Groceries", icon: "groceries", color: "#4FB286" },
@@ -24,11 +28,14 @@ export const CATEGORIES = [
   { id: "uncategorized", label: "Uncategorized", icon: "uncategorized", color: "#8C9296" },
 ];
 
+// The user's bank accounts. Only the last 4 digits are ever stored (ui-constraints.md).
 export const ACCOUNTS = [
   { id: "acct-checking", name: "Checking", last4: "4521" },
   { id: "acct-credit", name: "Credit Card", last4: "8830" },
 ];
 
+// Sample transactions, written as short arrays to keep the file readable.
+// TRANSACTIONS below turns each array into a full transaction object.
 // [date, merchant, amount, category, confidence, accountId]
 const RAW = [
   // ---- September 2026 ----
@@ -93,6 +100,8 @@ const RAW = [
   ["2026-08-28", "The Blue Door Kitchen", -118.6, "dining", 0.82, "acct-credit"],
 ];
 
+// Each array → a transaction object with the fields from data-model.md.
+// ids are txn-001, txn-002, ... August rows point at statement stmt-001, September rows at stmt-003.
 export const TRANSACTIONS = RAW.map(([date, merchant, amount, category, categoryConfidence, accountId], i) => ({
   id: `txn-${String(i + 1).padStart(3, "0")}`,
   userId: "demo-user",
@@ -106,6 +115,7 @@ export const TRANSACTIONS = RAW.map(([date, merchant, amount, category, category
   sourceStatementId: date.startsWith(PREVIOUS_MONTH) ? "stmt-001" : "stmt-003",
 }));
 
+// One budget per category for the current month. The .map() adds the id, userId and month.
 export const BUDGETS = [
   { categoryId: "dining", limit: 250 },
   { categoryId: "groceries", limit: 500 },
@@ -117,6 +127,8 @@ export const BUDGETS = [
   { categoryId: "health", limit: 80 },
 ].map((b) => ({ ...b, id: `bud-${b.categoryId}-${CURRENT_MONTH}`, userId: "demo-user", month: CURRENT_MONTH }));
 
+// Sample Import history (newest first): two successful CSV imports and one failed PDF,
+// so the Import page can show every status.
 export const STATEMENTS = [
   {
     id: "stmt-003",
@@ -148,6 +160,7 @@ export const STATEMENTS = [
   },
 ];
 
+// The signed-in user's profile, shown in the top bar and on Settings
 export const PROFILE = {
   displayName: "Zach Sheppard",
   email: "demo@ledger.app",

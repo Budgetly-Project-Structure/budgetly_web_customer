@@ -1,3 +1,18 @@
+/**
+ * BudgetPage.jsx
+ *
+ * The "/budget" page: monthly spending limits per category.
+ *   - Three totals at the top: budgeted, spent so far, remaining (or over)
+ *   - A row per budget with a progress bar and status ("On track" / "Near limit" / "Over budget")
+ *   - Click the pencil to edit a limit inline, or remove the budget
+ *   - "No budget yet" lists categories without a limit, with a "+ Set budget" button
+ *
+ * Status thresholds come from lib/finance.js (85% = near, over 100% = over).
+ * Status is shown with an icon and a label, not just color (ui-constraints.md).
+ *
+ * Data: useFinance(). setBudgetLimit / removeBudget update local state for now
+ * (later: Firestore).
+ */
 import { useState } from "react";
 import Icon from "../components/Icon";
 import { Card, CategoryIcon, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
@@ -5,8 +20,18 @@ import { useFinance } from "../data/FinanceContext";
 import { BUDGET_STATUS, budgetRows, spendingByCategory } from "../lib/finance";
 import { formatCurrency, formatMonth } from "../lib/format";
 
+// Maps a budget status to the StatusChip color tone
 const STATUS_TONE = { over: "danger", near: "warn", ok: "ok" };
 
+/**
+ * Small inline form for typing a monthly limit in dollars.
+ * Save is disabled until the value is a positive number; Escape cancels.
+ * The saved value is rounded to whole dollars.
+ *
+ * @param {number} [initial]  Starting value
+ * @param {(limit: number) => void} onSave
+ * @param {() => void} onCancel
+ */
 function LimitEditor({ initial, onSave, onCancel }) {
   const [value, setValue] = useState(String(initial ?? ""));
   const num = Number(value);
@@ -44,6 +69,13 @@ function LimitEditor({ initial, onSave, onCancel }) {
   );
 }
 
+/**
+ * One budget in the list: name, amount left, status chip, spent / limit,
+ * and a progress bar. Switches to LimitEditor when `editing` is true.
+ *
+ * @param {Object}  row      A row from budgetRows() (lib/finance.js)
+ * @param {boolean} editing  Whether this row is being edited
+ */
 function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
   const s = BUDGET_STATUS[row.status];
   return (
@@ -80,6 +112,7 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
         )}
       </div>
       <div className="mt-3 flex items-center gap-3">
+        {/* role="progressbar" + aria values let screen readers announce the % used */}
         <div
           className="flex-1 h-2 rounded-full bg-charcoal border border-line overflow-hidden"
           role="progressbar"
@@ -101,15 +134,18 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
   );
 }
 
+/** Budget page component. */
 export default function BudgetPage() {
   const { budgets, transactions, categories, currentMonth, setBudgetLimit, removeBudget } = useFinance();
   const [editing, setEditing] = useState(null); // categoryId being edited, or "new:<id>"
 
+  // Budgets for this month, most-used first so problems are at the top
   const rows = budgetRows(budgets, transactions, currentMonth, categories).sort((a, b) => b.pct - a.pct);
   const totalLimit = rows.reduce((s, r) => s + r.limit, 0);
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0);
   const overCount = rows.filter((r) => r.status === "over").length;
 
+  // Categories with no budget yet. Income and Uncategorized can't have a budget.
   const spent = spendingByCategory(transactions, currentMonth);
   const unbudgeted = categories.filter(
     (c) => c.id !== "income" && c.id !== "uncategorized" && !rows.some((r) => r.categoryId === c.id)
@@ -175,6 +211,7 @@ export default function BudgetPage() {
                 </div>
                 {editing === `new:${c.id}` ? (
                   <LimitEditor
+                    // Suggested starting limit: this month's spending rounded up to $10, at least $50
                     initial={Math.max(50, Math.ceil((spent[c.id] || 0) / 10) * 10)}
                     onCancel={() => setEditing(null)}
                     onSave={(limit) => {

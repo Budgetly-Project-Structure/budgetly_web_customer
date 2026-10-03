@@ -1,3 +1,21 @@
+/**
+ * TransactionsPage.jsx
+ *
+ * The "/transactions" page: every imported transaction, with
+ *   - search by merchant, and filters for month, category and type (spending/income)
+ *   - a "Needs review" toggle for transactions the AI wasn't confident about
+ *   - sortable columns (date, merchant, amount)
+ *   - a category dropdown on every row, so fixing a category is one click + one choice
+ *
+ * Layout: a table on desktop and a card list on phones. ui-constraints.md says to
+ * design each separately instead of squeezing the table onto a small screen.
+ *
+ * The "review" filter is stored in the URL (?review=1) so the Home page's
+ * "Review now" button can link straight to the filtered list.
+ *
+ * Data: useFinance(). Changing a category calls updateTransactionCategory(),
+ * which marks the transaction isUserCorrected (later: a Firestore update).
+ */
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Icon from "../components/Icon";
@@ -7,6 +25,15 @@ import { needsReview } from "../lib/finance";
 import { formatAmount, formatDate, formatMonth, maskAccount } from "../lib/format";
 
 /** Inline category picker — correcting a category is one click + one choice (ui-constraints.md). */
+/**
+ * The category dropdown shown on each transaction.
+ * Adds a "Review" chip if the category is low-confidence, and "Edited" if
+ * the user already changed it.
+ *
+ * @param {Object}   txn         The transaction
+ * @param {Object[]} categories  All categories (for the options)
+ * @param {(id: string, category: string) => void} onChange
+ */
 function CategorySelect({ txn, categories, onChange }) {
   const flagged = needsReview(txn);
   return (
@@ -39,6 +66,13 @@ function CategorySelect({ txn, categories, onChange }) {
   );
 }
 
+/**
+ * A clickable column header that sorts the table.
+ * First click sorts descending; clicking the active column again flips the direction.
+ *
+ * @param {string} field  Which field this column sorts by ("date" | "merchant" | "amount")
+ * @param {{field: string, dir: "asc"|"desc"}} sort  Current sort
+ */
 function SortHeader({ label, field, sort, setSort, align = "left" }) {
   const active = sort.field === field;
   return (
@@ -54,18 +88,22 @@ function SortHeader({ label, field, sort, setSort, align = "left" }) {
   );
 }
 
+/** Transactions page component. */
 export default function TransactionsPage() {
   const { transactions, transactionsLoading, transactionsError, categories, accounts, currentMonth, previousMonth, updateTransactionCategory } =
     useFinance();
   const [params, setParams] = useSearchParams();
 
+  // Filter and sort state. Month defaults to the current month; newest first.
   const [query, setQuery] = useState("");
   const [month, setMonth] = useState(currentMonth);
   const [category, setCategory] = useState("all");
   const [type, setType] = useState("all");
   const [sort, setSort] = useState({ field: "date", dir: "desc" });
+  // "Needs review" lives in the URL instead of state (see header comment)
   const reviewOnly = params.get("review") === "1";
 
+  // Turns ?review=1 on or off. replace:true so toggling doesn't fill up browser history.
   const setReviewOnly = (on) => {
     const next = new URLSearchParams(params);
     if (on) next.set("review", "1");
@@ -73,9 +111,11 @@ export default function TransactionsPage() {
     setParams(next, { replace: true });
   };
 
+  // Lookups from ids to full objects (for icons, labels, masked account numbers)
   const catById = (id) => categories.find((c) => c.id === id);
   const acctById = (id) => accounts.find((a) => a.id === id);
 
+  // Apply every filter, then sort. useMemo re-runs this only when an input changes.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = transactions.filter((t) => {
@@ -87,6 +127,8 @@ export default function TransactionsPage() {
       if (q && !t.merchant.toLowerCase().includes(q)) return false;
       return true;
     });
+    // dir flips the comparison for ascending vs descending.
+    // Amount sorts by size (ignoring sign); date ties are broken by id so the order is stable.
     const dir = sort.dir === "asc" ? 1 : -1;
     return list.sort((a, b) => {
       if (sort.field === "amount") return (Math.abs(a.amount) - Math.abs(b.amount)) * dir;
@@ -95,7 +137,9 @@ export default function TransactionsPage() {
     });
   }, [transactions, query, month, category, type, reviewOnly, sort]);
 
+  // Sum of what's on screen (shown as "net" above the table)
   const net = filtered.reduce((s, t) => s + t.amount, 0);
+  // Count for the "Needs review (N)" button, for the selected month regardless of other filters
   const reviewTotal = transactions.filter((t) => (month === "all" || t.date.startsWith(month)) && needsReview(t)).length;
   const hasFilters = query || category !== "all" || type !== "all" || reviewOnly;
 
