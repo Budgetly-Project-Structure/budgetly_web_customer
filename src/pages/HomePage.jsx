@@ -8,8 +8,8 @@
  *   4. The top insight and a nudge to review low-confidence categories
  *   5. The 6 most recent transactions this month
  *
- * Data: everything comes from useFinance() (FinanceProvider). Right now that is
- * mock data; when it switches to Firestore this page won't need to change.
+ * Data: everything comes from useFinance() (FinanceProvider). Transactions are
+ * live from Firestore; budgets are still mock data.
  * All the math lives in lib/finance.js so this file only handles display.
  *
  * New user with no transactions → shows an empty state pointing to /import
@@ -43,7 +43,26 @@ function SummaryTile({ label, value, sub, subTone = "muted" }) {
 
 /** Dashboard page component. */
 export default function HomePage() {
-  const { transactions, budgets, categories, currentMonth, previousMonth, profile } = useFinance();
+  const { transactions, transactionsLoading, transactionsError, budgets, categories, currentMonth, previousMonth, profile } =
+    useFinance();
+
+  // Waiting for the first snapshot from Firestore: don't flash "no data yet"
+  if (transactionsLoading) {
+    return (
+      <p className="py-16 text-center text-sm text-textMuted" role="status">
+        Loading your transactions…
+      </p>
+    );
+  }
+
+  // Couldn't read from Firestore: say so, rather than telling a user with data to import
+  if (transactionsError) {
+    return (
+      <Card>
+        <EmptyState icon="alert" title="We couldn't load your transactions" body={transactionsError} />
+      </Card>
+    );
+  }
 
   // Brand-new user: nothing imported yet, so show the "import your first statement" card
   if (transactions.length === 0) {

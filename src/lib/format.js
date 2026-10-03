@@ -44,7 +44,7 @@ export function formatMonth(month) {
 
 /** "4521" → "•••• 4521". Full account numbers are never shown. */
 export function maskAccount(last4) {
-  return `•••• ${last4}`;
+  return last4 ? `•••• ${last4}` : "";
 }
 
 /** 84.6 → "85%" */
