@@ -97,7 +97,7 @@ export default function ImportPage() {
    */
   async function startUpload(file) {
     // Temporary local id for this history row (not the Firestore doc id)
-    const id = `stmt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const id = `stmt-${crypto.randomUUID()}`;
 
     addStatement({
       id,
