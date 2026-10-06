@@ -73,10 +73,16 @@ function LimitEditor({ initial, onSave, onCancel }) {
  * One budget in the list: name, amount left, status chip, spent / limit,
  * and a progress bar. Switches to LimitEditor when `editing` is true.
  *
- * @param {Object}  row      A row from budgetRows() (lib/finance.js)
+ * @param {Object}  row      A row from budgetRows() (lib/finance.js):
+ *                           { id, categoryId, category, limit, spent, remaining, pct, status }
  * @param {boolean} editing  Whether this row is being edited
+ * @param {() => void} onEdit                Opens the inline editor (pencil button)
+ * @param {(limit: number) => void} onSave   Saves a new limit for this category
+ * @param {() => void} onCancel              Closes the editor without saving
+ * @param {() => void} onRemove              Deletes this budget (only shown while editing)
  */
 function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
+  // Icon, label, and bar/text colors for this row's status (ok / near / over)
   const s = BUDGET_STATUS[row.status];
   return (
     <li className="px-5 py-4">
@@ -84,6 +90,7 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
         <CategoryIcon category={row.category} />
         <div className="flex-1 min-w-[10rem]">
           <p className="text-sm font-medium text-textLight">{row.category.label}</p>
+          {/* remaining goes negative once spending passes the limit */}
           <p className="text-xs text-textMuted mt-0.5">
             {row.remaining >= 0
               ? `${formatCurrency(row.remaining)} left`
@@ -121,6 +128,7 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
           aria-valuemax={100}
           aria-label={`${row.category.label}: ${Math.round(row.pct)}% of budget used`}
         >
+          {/* Fill is capped at 100% so over-budget bars don't overflow; the % label still shows the real value */}
           <div className={`h-full rounded-full ${s.bar}`} style={{ width: `${Math.min(100, row.pct)}%` }} />
         </div>
         <span className={`w-10 text-right text-xs font-mono tabular-nums ${s.text}`}>{Math.round(row.pct)}%</span>
@@ -134,19 +142,29 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
   );
 }
 
-/** Budget page component. */
+/**
+ * Budget page component.
+ *
+ * Builds the page from the current month's budgets and transactions:
+ * summary totals, the list of budgeted categories, and the categories
+ * that don't have a budget yet. Only one limit can be edited at a time.
+ */
 export default function BudgetPage() {
   const { budgets, transactions, categories, currentMonth, setBudgetLimit, removeBudget } = useFinance();
-  const [editing, setEditing] = useState(null); // categoryId being edited, or "new:<id>"
+  // Which editor is open: an existing budget's categoryId, "new:<categoryId>"
+  // for a category in "No budget yet", or null when nothing is being edited
+  const [editing, setEditing] = useState(null);
 
   // Budgets for this month, most-used first so problems are at the top
   const rows = budgetRows(budgets, transactions, currentMonth, categories).sort((a, b) => b.pct - a.pct);
+  // Totals for the summary cards
   const totalLimit = rows.reduce((s, r) => s + r.limit, 0);
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0);
   const overCount = rows.filter((r) => r.status === "over").length;
 
-  // Categories with no budget yet. Income and Uncategorized can't have a budget.
+  // Spending per category this month, used for the "No budget yet" list
   const spent = spendingByCategory(transactions, currentMonth);
+  // Categories with no budget yet. Income and Uncategorized can't have a budget.
   const unbudgeted = categories.filter(
     (c) => c.id !== "income" && c.id !== "uncategorized" && !rows.some((r) => r.categoryId === c.id)
   );
@@ -155,6 +173,7 @@ export default function BudgetPage() {
     <div>
       <PageHeader title="Budget" description={`Monthly limits for ${formatMonth(currentMonth)}.`} />
 
+      {/* Summary cards: budgeted, spent so far, remaining (or over) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div className="bg-surface border border-line rounded-lg p-4">
           <p className="text-xs text-textMuted mb-2">Budgeted</p>
@@ -177,6 +196,7 @@ export default function BudgetPage() {
         </div>
       </div>
 
+      {/* Budgeted categories, highest % used first */}
       <Card title="Categories" padded={false}>
         <ul className="divide-y divide-line border-t border-line">
           {rows.map((row) => (
@@ -199,6 +219,7 @@ export default function BudgetPage() {
         </ul>
       </Card>
 
+      {/* Categories without a limit; hidden once every category has a budget */}
       {unbudgeted.length > 0 && (
         <Card title="No budget yet" className="mt-6" padded={false}>
           <ul className="divide-y divide-line border-t border-line">
