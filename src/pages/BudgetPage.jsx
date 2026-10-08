@@ -6,18 +6,21 @@
  *   - A row per budget with a progress bar and status ("On track" / "Near limit" / "Over budget")
  *   - Click the pencil to edit a limit inline, or remove the budget
  *   - "No budget yet" lists categories without a limit, with a "+ Set budget" button
+ *   - "Auto budget" suggests a limit for every category from past spending
+ *     (suggestBudgets in lib/finance.js) and shows a preview before anything changes
+ *   - "+ New category" lets the user make their own category
  *
  * Status thresholds come from lib/finance.js (85% = near, over 100% = over).
  * Status is shown with an icon and a label, not just color (ui-constraints.md).
  *
- * Data: useFinance(). setBudgetLimit / removeBudget update local state for now
- * (later: Firestore).
+ * Data: useFinance(). setBudgetLimit / removeBudget / addCategory update local state
+ * for now (later: Firestore).
  */
 import { useState } from "react";
 import Icon from "../components/Icon";
 import { Card, CategoryIcon, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
-import { BUDGET_STATUS, budgetRows, spendingByCategory } from "../lib/finance";
+import { BUDGET_STATUS, budgetRows, spendingByCategory, suggestBudgets } from "../lib/finance";
 import { formatCurrency, formatMonth } from "../lib/format";
 
 // Maps a budget status to the StatusChip color tone
@@ -65,6 +68,127 @@ function LimitEditor({ initial, onSave, onCancel }) {
       <button type="button" onClick={onCancel} className="text-sm text-textMuted hover:text-textLight px-1">
         Cancel
       </button>
+    </form>
+  );
+}
+
+/**
+ * Preview of the Auto budget suggestion. Nothing changes until "Apply".
+ * Each row shows the current limit (or a dash), the suggested limit and why.
+ *
+ * @param {Object}   suggestion  Result of suggestBudgets() (lib/finance.js)
+ * @param {Object}   current     { [categoryId]: limit } for budgets that already exist
+ * @param {Object[]} categories
+ * @param {() => void} onApply
+ * @param {() => void} onCancel
+ */
+function AutoBudgetPreview({ suggestion, current, categories, onApply, onCancel }) {
+  const { rows, total, months, income, capped } = suggestion;
+  const catById = (id) => categories.find((c) => c.id === id);
+  return (
+    <Card title="Suggested budget" className="mb-6" padded={false}>
+      <p className="px-5 pb-3 text-sm text-textMuted">
+        Based on what you spent in {months.map((m) => formatMonth(m).split(" ")[0]).join(", ")}. Regular bills keep
+        their usual amount; dining, shopping, entertainment and your own categories are trimmed 10% to help you save.
+        {capped && ` Flexible spending was cut further so the total stays under 80% of your income (${formatCurrency(income)}).`}
+      </p>
+      <ul className="divide-y divide-line border-t border-line">
+        {rows.map((r) => (
+          <li key={r.categoryId} className="px-5 py-3 flex flex-wrap items-center gap-3">
+            <CategoryIcon category={catById(r.categoryId)} size="sm" />
+            <div className="flex-1 min-w-[10rem]">
+              <p className="text-sm text-textLight">{catById(r.categoryId)?.label}</p>
+              <p className="text-xs text-textMuted">{r.reason}</p>
+            </div>
+            <span className="font-mono text-sm tabular-nums text-textMuted">
+              {current[r.categoryId] ? formatCurrency(current[r.categoryId]) : "—"}
+            </span>
+            <span className="text-textMuted" aria-hidden="true">
+              →
+            </span>
+            <span className="w-20 text-right font-mono text-sm tabular-nums text-green">{formatCurrency(r.limit)}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="px-5 py-4 border-t border-line flex flex-wrap items-center gap-3">
+        <p className="flex-1 text-sm text-textLight">
+          Total: <span className="font-mono tabular-nums">{formatCurrency(total)}</span>
+          {income > 0 && <span className="text-textMuted"> of {formatCurrency(income)} income</span>}
+        </p>
+        <button type="button" onClick={onCancel} className={buttonStyles.secondary}>
+          Cancel
+        </button>
+        <button type="button" onClick={onApply} className={buttonStyles.primary}>
+          Apply
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+// Colors a new category can use (same family as the built-in chart colors)
+const CATEGORY_COLORS = ["#E08A5B", "#4FB286", "#5B8DD6", "#A77BD6", "#D6B35B", "#D65B8D"];
+
+/**
+ * Small form for making a new category: a name (required, unique, up to 30
+ * characters) and a color. The "already used" check ignores upper/lower case.
+ *
+ * @param {Object[]} categories  Existing categories, to catch duplicate names
+ * @param {({label, color}) => void} onSave
+ * @param {() => void} onCancel
+ */
+function NewCategoryForm({ categories, onSave, onCancel }) {
+  const [label, setLabel] = useState("");
+  const [color, setColor] = useState(CATEGORY_COLORS[0]);
+  const name = label.trim();
+  const taken = categories.some((c) => c.label.toLowerCase() === name.toLowerCase());
+  const valid = name !== "" && !taken;
+
+  return (
+    <form
+      className="px-5 py-4 border-t border-line flex flex-wrap items-end gap-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (valid) onSave({ label: name, color });
+      }}
+    >
+      <label className="flex-1 min-w-[12rem]">
+        <span className="block text-xs text-textMuted mb-1">Category name</span>
+        <input
+          autoFocus
+          maxLength={30}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => e.key === "Escape" && onCancel()}
+          placeholder="e.g. Pets"
+          className={`${inputStyles} w-full`}
+        />
+        {taken && <span className="block text-xs text-danger mt-1">You already have a category with that name.</span>}
+      </label>
+      <fieldset>
+        <legend className="text-xs text-textMuted mb-1">Color</legend>
+        <div className="flex gap-2 py-1.5">
+          {CATEGORY_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setColor(c)}
+              aria-label={`Color ${c}`}
+              aria-pressed={color === c}
+              className={`w-6 h-6 rounded-full border-2 ${color === c ? "border-textLight" : "border-transparent"}`}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+        </div>
+      </fieldset>
+      <div className="flex items-center gap-2">
+        <button type="submit" disabled={!valid} className={buttonStyles.primary}>
+          Add category
+        </button>
+        <button type="button" onClick={onCancel} className="text-sm text-textMuted hover:text-textLight px-1">
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }
@@ -150,10 +274,15 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
  * that don't have a budget yet. Only one limit can be edited at a time.
  */
 export default function BudgetPage() {
-  const { budgets, transactions, categories, currentMonth, setBudgetLimit, removeBudget } = useFinance();
+  const { budgets, transactions, categories, currentMonth, profile, setBudgetLimit, removeBudget, addCategory } =
+    useFinance();
   // Which editor is open: an existing budget's categoryId, "new:<categoryId>"
   // for a category in "No budget yet", or null when nothing is being edited
   const [editing, setEditing] = useState(null);
+  // Auto budget: the suggestion being previewed (null = closed), or a note when there's nothing to go on
+  const [suggestion, setSuggestion] = useState(null);
+  const [autoNote, setAutoNote] = useState("");
+  const [addingCategory, setAddingCategory] = useState(false);
 
   // Budgets for this month, most-used first so problems are at the top
   const rows = budgetRows(budgets, transactions, currentMonth, categories).sort((a, b) => b.pct - a.pct);
@@ -169,9 +298,49 @@ export default function BudgetPage() {
     (c) => c.id !== "income" && c.id !== "uncategorized" && !rows.some((r) => r.categoryId === c.id)
   );
 
+  // Opens the Auto budget preview, or explains why it can't make one yet
+  const openAutoBudget = () => {
+    const result = suggestBudgets(transactions, currentMonth, categories, profile.monthlyIncome);
+    if (result.rows.length) {
+      setSuggestion(result);
+      setAutoNote("");
+    } else {
+      setSuggestion(null);
+      setAutoNote("Auto budget learns from your spending. Import a bank statement first, then try again.");
+    }
+  };
+
+  // Saves every suggested limit; existing ones are updated, the rest are created
+  const applyAutoBudget = () => {
+    for (const r of suggestion.rows) setBudgetLimit(r.categoryId, r.limit);
+    setSuggestion(null);
+    setEditing(null);
+  };
+
   return (
     <div>
-      <PageHeader title="Budget" description={`Monthly limits for ${formatMonth(currentMonth)}.`} />
+      <PageHeader
+        title="Budget"
+        description={`Monthly limits for ${formatMonth(currentMonth)}.`}
+        actions={
+          <button type="button" onClick={openAutoBudget} className={buttonStyles.secondary}>
+            <Icon name="sparkle" className="w-4 h-4 text-green" /> Auto budget
+          </button>
+        }
+      />
+
+      {autoNote && (
+        <p className="mb-6 text-sm text-textMuted bg-surface border border-line rounded-lg px-4 py-3">{autoNote}</p>
+      )}
+      {suggestion && (
+        <AutoBudgetPreview
+          suggestion={suggestion}
+          current={Object.fromEntries(rows.map((r) => [r.categoryId, r.limit]))}
+          categories={categories}
+          onApply={applyAutoBudget}
+          onCancel={() => setSuggestion(null)}
+        />
+      )}
 
       {/* Summary cards: budgeted, spent so far, remaining (or over) */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
@@ -219,9 +388,34 @@ export default function BudgetPage() {
         </ul>
       </Card>
 
-      {/* Categories without a limit; hidden once every category has a budget */}
-      {unbudgeted.length > 0 && (
-        <Card title="No budget yet" className="mt-6" padded={false}>
+      {/* Categories without a limit, plus the button for making a new category */}
+      <Card
+        title="No budget yet"
+        className="mt-6"
+        padded={false}
+        action={
+          !addingCategory && (
+            <button type="button" onClick={() => setAddingCategory(true)} className={buttonStyles.ghost}>
+              + New category
+            </button>
+          )
+        }
+      >
+        {addingCategory && (
+          <NewCategoryForm
+            categories={categories}
+            onCancel={() => setAddingCategory(false)}
+            onSave={(fields) => {
+              const created = addCategory(fields);
+              setAddingCategory(false);
+              // Open the limit editor for it right away
+              if (created) setEditing(`new:${created.id}`);
+            }}
+          />
+        )}
+        {unbudgeted.length === 0 ? (
+          <p className="px-5 py-4 border-t border-line text-sm text-textMuted">Every category has a budget.</p>
+        ) : (
           <ul className="divide-y divide-line border-t border-line">
             {unbudgeted.map((c) => (
               <li key={c.id} className="px-5 py-3 flex flex-wrap items-center gap-3">
@@ -248,8 +442,8 @@ export default function BudgetPage() {
               </li>
             ))}
           </ul>
-        </Card>
-      )}
+        )}
+      </Card>
     </div>
   );
 }
