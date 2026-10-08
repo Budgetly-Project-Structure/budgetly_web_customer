@@ -2,7 +2,10 @@
  * HomePage.jsx
  *
  * The dashboard ("/"), the first page a signed-in user sees. It shows:
- *   1. Headline: how much of this month's total budget is spent, with a progress bar
+ *   1. Headline: the month's budget card. The budget is the month's money in, so it
+ *      shows money out ("Spent so far"), what's left (money in minus money out) and a
+ *      progress bar. A month with no money in (e.g. only a credit card statement)
+ *      falls back to the total of the category budget limits.
  *   2. Four summary tiles: income, spending (vs last month), net, and "needs review"
  *   3. "Budgets to watch": the 5 budgets closest to (or over) their limit
  *   4. The top insight and a nudge to review low-confidence categories
@@ -105,11 +108,14 @@ export default function HomePage() {
   const prevTotals = monthTotals(transactions, previousMonth);
   // One row per budget with spent, remaining, % used and status (see lib/finance.js)
   const rows = budgetRows(monthBudgets, transactions, month, categories);
-  // Headline numbers only count spending in categories that HAVE a budget
-  const totalBudget = rows.reduce((s, r) => s + r.limit, 0);
-  const budgetedSpent = rows.reduce((s, r) => s + r.spent, 0);
+  // Budget card: the month's money in is the budget, and all money out counts against it.
+  // With no money in, fall back to the category limits and the spending in those categories.
+  const fromIncome = totals.income > 0;
+  const totalBudget = fromIncome ? totals.income : rows.reduce((s, r) => s + r.limit, 0);
+  const budgetedSpent = fromIncome ? totals.spending : rows.reduce((s, r) => s + r.spent, 0);
   const pctUsed = totalBudget ? (budgetedSpent / totalBudget) * 100 : 0;
   const leftToSpend = totalBudget - budgetedSpent;
+  const monthName = formatMonth(month).split(" ")[0];
 
   // Newest 6 transactions this month (ISO dates sort correctly as strings)
   const recent = transactions
@@ -173,7 +179,7 @@ export default function HomePage() {
               </p>
             </div>
             <div>
-              <p className="text-xs text-textMuted mb-1">Total budget</p>
+              <p className="text-xs text-textMuted mb-1">{fromIncome ? "Budget (money in)" : "Total budget"}</p>
               <p className="font-mono text-3xl font-semibold text-textLight tabular-nums">{formatCurrency(totalBudget)}</p>
             </div>
           </div>
@@ -186,9 +192,11 @@ export default function HomePage() {
               />
             </div>
             <p className="text-sm text-textMuted mt-2">
-              {totalBudget
-                ? `You've used ${Math.round(pctUsed)}% of your ${formatMonth(month).split(" ")[0]} budget.`
-                : "No budgets set yet. Add some on the Budget page."}
+              {fromIncome
+                ? `You've spent ${Math.round(pctUsed)}% of the money that came in this ${monthName}.`
+                : totalBudget
+                  ? `No money came in this ${monthName}, so this uses your category budgets. You've used ${Math.round(pctUsed)}%.`
+                  : "No money in and no budgets set for this month. Your budget is the month's money in once a deposit shows up, or add budgets on the Budget page."}
             </p>
           </div>
         </div>
