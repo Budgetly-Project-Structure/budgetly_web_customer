@@ -9,8 +9,10 @@
  *   - A row per budget with a progress bar and status ("On track" / "Near limit" / "Over budget")
  *   - Click the pencil to edit a limit inline, or remove the budget
  *   - "No budget yet" lists categories without a limit, with a "+ Set budget" button
- *   - "Auto budget" suggests a limit for every category from past spending
- *     (suggestBudgets in lib/finance.js) and shows a preview before anything changes
+ *   - "Auto budget" spreads all of the month's money in over the categories, in
+ *     proportion to past spending (suggestBudgets in lib/finance.js). The user can
+ *     keep an amount for savings, which comes out of every category evenly. A
+ *     preview shows the result before anything changes.
  *   - "+ New category" lets the user make their own category
  *
  * Status thresholds come from lib/finance.js (85% = near, over 100% = over).
@@ -77,24 +79,74 @@ function LimitEditor({ initial, onSave, onCancel }) {
 
 /**
  * Preview of the Auto budget suggestion. Nothing changes until "Apply".
- * Each row shows the current limit (or a dash), the suggested limit and why.
+ * Shows money in, the savings field, and one row per category with the current
+ * limit (or a dash), the suggested limit and why. Budgets for categories with no
+ * recent spending are listed too, because Apply removes them.
  *
- * @param {Object}   suggestion  Result of suggestBudgets() (lib/finance.js)
- * @param {Object}   current     { [categoryId]: limit } for budgets that already exist
+ * @param {Object}   suggestion   Result of suggestBudgets() (lib/finance.js)
+ * @param {Object}   current      { [categoryId]: limit } for budgets that already exist
+ * @param {string[]} removing     Category ids whose budgets Apply will remove
  * @param {Object[]} categories
+ * @param {string}   savings      What's typed in the savings field
+ * @param {string}   [savingsError]  Shown under the field; Apply is disabled while set
+ * @param {(value: string) => void} onSavingsChange
  * @param {() => void} onApply
  * @param {() => void} onCancel
  */
-function AutoBudgetPreview({ suggestion, current, categories, onApply, onCancel }) {
-  const { rows, total, months, income, capped } = suggestion;
+function AutoBudgetPreview({
+  suggestion,
+  current,
+  removing,
+  categories,
+  savings,
+  savingsError,
+  onSavingsChange,
+  onApply,
+  onCancel,
+}) {
+  const { rows, total, months, income, fromIncome } = suggestion;
   const catById = (id) => categories.find((c) => c.id === id);
+  const monthNames = months.map((m) => formatMonth(m).split(" ")[0]).join(", ");
   return (
     <Card title="Suggested budget" className="mb-6" padded={false}>
       <p className="px-5 pb-3 text-sm text-textMuted">
-        Based on what you spent in {months.map((m) => formatMonth(m).split(" ")[0]).join(", ")}. Regular bills keep
-        their usual amount; dining, shopping, entertainment and your own categories are trimmed 10% to help you save.
-        {capped && ` Flexible spending was cut further so the total stays under 80% of your income (${formatCurrency(income)}).`}
+        {fromIncome
+          ? `All of your money in is split across your categories, based on how you spent in ${monthNames}. Want to save some? Enter it below and it comes out of every category evenly.`
+          : `No money in yet, so each category gets what you usually spend there (from ${monthNames}). Once a deposit shows up, Auto budget will use your money in instead.`}
       </p>
+
+      {fromIncome && (
+        <div className="px-5 pb-4 grid grid-cols-1 sm:grid-cols-3 gap-4 items-start">
+          <div>
+            <p className="text-xs text-textMuted mb-1">Money in</p>
+            <p className="font-mono text-lg tabular-nums text-textLight">{formatCurrency(income)}</p>
+          </div>
+          <label className="block">
+            <span className="block text-xs text-textMuted mb-1">Keep for savings (not budgeted)</span>
+            <span className="relative block">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-sm text-textMuted">$</span>
+              <input
+                type="number"
+                min="0"
+                max={income}
+                step="1"
+                inputMode="numeric"
+                value={savings}
+                onChange={(e) => onSavingsChange(e.target.value)}
+                placeholder="0"
+                className={`${inputStyles} w-full pl-6 py-1.5 font-mono`}
+                aria-invalid={Boolean(savingsError)}
+              />
+            </span>
+            {savingsError && <span className="block text-xs text-danger mt-1">{savingsError}</span>}
+          </label>
+          <div>
+            <p className="text-xs text-textMuted mb-1">Budgeted to categories</p>
+            <p className="font-mono text-lg tabular-nums text-green">{formatCurrency(total)}</p>
+          </div>
+        </div>
+      )}
+
       <ul className="divide-y divide-line border-t border-line">
         {rows.map((r) => (
           <li key={r.categoryId} className="px-5 py-3 flex flex-wrap items-center gap-3">
@@ -112,16 +164,32 @@ function AutoBudgetPreview({ suggestion, current, categories, onApply, onCancel 
             <span className="w-20 text-right font-mono text-sm tabular-nums text-green">{formatCurrency(r.limit)}</span>
           </li>
         ))}
+        {removing.map((id) => (
+          <li key={id} className="px-5 py-3 flex flex-wrap items-center gap-3">
+            <CategoryIcon category={catById(id)} size="sm" />
+            <div className="flex-1 min-w-[10rem]">
+              <p className="text-sm text-textLight">{catById(id)?.label}</p>
+              <p className="text-xs text-textMuted">No spending in {monthNames}, so this budget is removed</p>
+            </div>
+            <span className="font-mono text-sm tabular-nums text-textMuted">{formatCurrency(current[id])}</span>
+            <span className="text-textMuted" aria-hidden="true">
+              →
+            </span>
+            <span className="w-20 text-right text-sm text-textMuted">—</span>
+          </li>
+        ))}
       </ul>
       <div className="px-5 py-4 border-t border-line flex flex-wrap items-center gap-3">
         <p className="flex-1 text-sm text-textLight">
           Total: <span className="font-mono tabular-nums">{formatCurrency(total)}</span>
-          {income > 0 && <span className="text-textMuted"> of {formatCurrency(income)} income</span>}
+          {fromIncome && suggestion.savings > 0 && (
+            <span className="text-textMuted"> + {formatCurrency(suggestion.savings)} kept for savings</span>
+          )}
         </p>
         <button type="button" onClick={onCancel} className={buttonStyles.secondary}>
           Cancel
         </button>
-        <button type="button" onClick={onApply} className={buttonStyles.primary}>
+        <button type="button" onClick={onApply} disabled={Boolean(savingsError)} className={buttonStyles.primary}>
           Apply
         </button>
       </div>
@@ -282,9 +350,12 @@ export default function BudgetPage() {
   // Which editor is open: an existing budget's categoryId, "new:<categoryId>"
   // for a category in "No budget yet", or null when nothing is being edited
   const [editing, setEditing] = useState(null);
-  // Auto budget: the suggestion being previewed (null = closed), or a note when there's nothing to go on
-  const [suggestion, setSuggestion] = useState(null);
+  // Auto budget: whether the preview is open, what's typed in its savings field,
+  // a note when there's nothing to go on, and the savings last applied (to label "unassigned")
+  const [autoOpen, setAutoOpen] = useState(false);
+  const [savingsInput, setSavingsInput] = useState("");
   const [autoNote, setAutoNote] = useState("");
+  const [appliedSavings, setAppliedSavings] = useState(0);
   const [addingCategory, setAddingCategory] = useState(false);
 
   // Budgets for this month, most-used first so problems are at the top
@@ -319,23 +390,43 @@ export default function BudgetPage() {
     (c) => c.id !== "income" && c.id !== "uncategorized" && !rows.some((r) => r.categoryId === c.id)
   );
 
+  // Auto budget uses the same money in as the totals above.
+  // Recomputed on every render while open, so the preview follows the savings field live.
+  const autoIncome = profile.monthlyIncome || income;
+  const savingsNum = savingsInput.trim() === "" ? 0 : Number(savingsInput);
+  const savingsError =
+    !Number.isFinite(savingsNum) || savingsNum < 0
+      ? "Enter an amount of $0 or more."
+      : savingsNum > autoIncome && autoIncome > 0
+        ? `That's more than your money in (${formatCurrency(autoIncome)}).`
+        : "";
+  const suggestion = autoOpen
+    ? suggestBudgets(transactions, currentMonth, categories, autoIncome, savingsError ? 0 : savingsNum)
+    : null;
+  // Existing budgets for categories the suggestion doesn't cover (no recent spending)
+  const removing = suggestion
+    ? rows.map((r) => r.categoryId).filter((id) => !suggestion.rows.some((x) => x.categoryId === id))
+    : [];
+
   // Opens the Auto budget preview, or explains why it can't make one yet
   const openAutoBudget = () => {
-    // Same income as the totals above, so the 80% cap matches what the page shows
-    const result = suggestBudgets(transactions, currentMonth, categories, profile.monthlyIncome || income);
-    if (result.rows.length) {
-      setSuggestion(result);
+    if (suggestBudgets(transactions, currentMonth, categories, autoIncome).rows.length) {
+      setAutoOpen(true);
+      setSavingsInput("");
       setAutoNote("");
     } else {
-      setSuggestion(null);
+      setAutoOpen(false);
       setAutoNote("Auto budget learns from your spending. Import a bank statement first, then try again.");
     }
   };
 
-  // Saves every suggested limit; existing ones are updated, the rest are created
+  // Saves every suggested limit (existing ones are updated, the rest created) and
+  // removes budgets the suggestion doesn't cover, so the total matches the preview
   const applyAutoBudget = () => {
     for (const r of suggestion.rows) setBudgetLimit(r.categoryId, r.limit);
-    setSuggestion(null);
+    for (const id of removing) removeBudget(id);
+    setAppliedSavings(suggestion.savings);
+    setAutoOpen(false);
     setEditing(null);
   };
 
@@ -358,9 +449,13 @@ export default function BudgetPage() {
         <AutoBudgetPreview
           suggestion={suggestion}
           current={Object.fromEntries(rows.map((r) => [r.categoryId, r.limit]))}
+          removing={removing}
           categories={categories}
+          savings={savingsInput}
+          savingsError={savingsError}
+          onSavingsChange={setSavingsInput}
           onApply={applyAutoBudget}
-          onCancel={() => setSuggestion(null)}
+          onCancel={() => setAutoOpen(false)}
         />
       )}
 
@@ -397,7 +492,9 @@ export default function BudgetPage() {
         {!fromIncome
           ? "No money in yet, so the budget is your category limits added up. It switches to your money in once a deposit shows up."
           : unassigned >= 0
-            ? `${formatCurrency(totalLimit)} of ${formatCurrency(income)} assigned to categories, ${formatCurrency(unassigned)} unassigned.`
+            ? `${formatCurrency(totalLimit)} of ${formatCurrency(income)} assigned to categories, ${formatCurrency(unassigned)} unassigned${
+                unassigned > 0 && unassigned === appliedSavings ? " (savings)" : ""
+              }.`
             : `Your category limits add up to ${formatCurrency(totalLimit)}, ${formatCurrency(-unassigned)} more than came in.`}
       </p>
 
