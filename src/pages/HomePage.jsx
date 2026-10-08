@@ -8,6 +8,10 @@
  *   4. The top insight and a nudge to review low-confidence categories
  *   5. The 6 most recent transactions this month
  *
+ * Arrows next to the month let the user step back through earlier months.
+ * It opens on the newest month that has transactions (never later than today),
+ * so someone whose last statement ended last month doesn't land on an empty page.
+ *
  * Data: everything comes from useFinance() (FinanceProvider). Transactions are
  * live from Firestore; budgets are still mock data.
  * All the math lives in lib/finance.js so this file only handles display.
@@ -15,11 +19,12 @@
  * New user with no transactions → shows an empty state pointing to /import
  * (ui-constraints.md: design the empty state up front).
  */
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
 import { Card, CategoryIcon, EmptyState, StatusChip, buttonStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
-import { BUDGET_STATUS, budgetRows, generateInsights, monthTotals, needsReview } from "../lib/finance";
+import { BUDGET_STATUS, addMonths, budgetRows, generateInsights, monthTotals, needsReview } from "../lib/finance";
 import { formatAmount, formatCurrency, formatDate, formatMonth } from "../lib/format";
 
 /**
@@ -43,8 +48,9 @@ function SummaryTile({ label, value, sub, subTone = "muted" }) {
 
 /** Dashboard page component. */
 export default function HomePage() {
-  const { transactions, transactionsLoading, transactionsError, budgets, categories, currentMonth, previousMonth, profile } =
-    useFinance();
+  const { transactions, transactionsLoading, transactionsError, budgets, categories, currentMonth, profile } = useFinance();
+  // Month picked with the arrows; null = not picked yet, so use the default below
+  const [pickedMonth, setPickedMonth] = useState(null);
 
   // Waiting for the first snapshot from Firestore: don't flash "no data yet"
   if (transactionsLoading) {
@@ -82,12 +88,23 @@ export default function HomePage() {
     );
   }
 
+  // Newest month with transactions, but never later than the real current month
+  const latestMonth = transactions
+    .map((t) => t.date.slice(0, 7))
+    .filter((m) => m <= currentMonth)
+    .reduce((a, b) => (b > a ? b : a), "");
+  const month = pickedMonth ?? (latestMonth || currentMonth);
+  const previousMonth = addMonths(month, -1);
+  const firstName = profile.displayName.trim().split(" ")[0];
+  // Budgets are monthly limits, so this month's limits also apply to whichever month is shown
+  const monthBudgets = budgets.filter((b) => b.month === currentMonth).map((b) => ({ ...b, month }));
+
   // --- Numbers for the headline and summary tiles ---
   // totals / prevTotals = { income, spending, net } for this month and last month
-  const totals = monthTotals(transactions, currentMonth);
+  const totals = monthTotals(transactions, month);
   const prevTotals = monthTotals(transactions, previousMonth);
   // One row per budget with spent, remaining, % used and status (see lib/finance.js)
-  const rows = budgetRows(budgets, transactions, currentMonth, categories);
+  const rows = budgetRows(monthBudgets, transactions, month, categories);
   // Headline numbers only count spending in categories that HAVE a budget
   const totalBudget = rows.reduce((s, r) => s + r.limit, 0);
   const budgetedSpent = rows.reduce((s, r) => s + r.spent, 0);
@@ -96,12 +113,12 @@ export default function HomePage() {
 
   // Newest 6 transactions this month (ISO dates sort correctly as strings)
   const recent = transactions
-    .filter((t) => t.date.startsWith(currentMonth))
+    .filter((t) => t.date.startsWith(month))
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 6);
   // Counts for the tile sub-lines
-  const depositCount = transactions.filter((t) => t.date.startsWith(currentMonth) && t.amount > 0).length;
-  const reviewCount =transactions.filter((t) => t.date.startsWith(currentMonth) && needsReview(t)).length;
+  const depositCount = transactions.filter((t) => t.date.startsWith(month) && t.amount > 0).length;
+  const reviewCount =transactions.filter((t) => t.date.startsWith(month) && needsReview(t)).length;
 
   // Budgets that need attention first, then the biggest ones
   const watchList = [...rows]
@@ -109,7 +126,7 @@ export default function HomePage() {
     .slice(0, 5);
 
   // Only the first (most important) insight is shown here; /insights shows all of them
-  const insight = generateInsights(transactions, currentMonth, previousMonth, categories, budgets)[0];
+  const insight = generateInsights(transactions, month, previousMonth, categories, monthBudgets)[0];
   const catById = (id) => categories.find((c) => c.id === id);
   // % change in spending vs last month (0 if last month had no spending, to avoid dividing by 0)
   const spendChange = prevTotals.spending ? ((totals.spending - prevTotals.spending) / prevTotals.spending) * 100 : 0;
@@ -118,9 +135,28 @@ export default function HomePage() {
     <div className="space-y-8">
       {/* Headline */}
       <div>
-        <p className="text-sm text-textMuted mb-1">
-          Hi {profile.displayName.split(" ")[0]} · {formatMonth(currentMonth)}
-        </p>
+        <div className="flex items-center gap-2 text-sm text-textMuted mb-1">
+          <span>Hi {firstName || "there"} ·</span>
+          <button
+            type="button"
+            onClick={() => setPickedMonth(addMonths(month, -1))}
+            className="px-1.5 rounded hover:text-textLight"
+            aria-label="Previous month"
+          >
+            &lt;
+          </button>
+          <span className="text-textLight">{formatMonth(month)}</span>
+          {/* No "next" past the real current month */}
+          <button
+            type="button"
+            onClick={() => setPickedMonth(addMonths(month, 1))}
+            disabled={month >= currentMonth}
+            className="px-1.5 rounded hover:text-textLight disabled:opacity-30 disabled:hover:text-textMuted"
+            aria-label="Next month"
+          >
+            &gt;
+          </button>
+        </div>
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="font-mono text-4xl sm:text-5xl font-semibold text-green tabular-nums">
             {formatCurrency(budgetedSpent)}
@@ -145,23 +181,27 @@ export default function HomePage() {
       {/* Summary tiles */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Spending going UP is shown as a warning; going down is good */}
-        <SummaryTile label="Income" value={formatCurrency(totals.income)} sub={`${depositCount} deposit${depositCount === 1 ? "" : "s"}`} />
+        <SummaryTile label="Money in" value={formatCurrency(totals.income)} sub={`${depositCount} deposit${depositCount === 1 ? "" : "s"}`} />
         <SummaryTile
-          label="Spending"
+          label="Money out"
           value={formatCurrency(totals.spending)}
           sub={`${spendChange >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(spendChange))}% vs ${formatMonth(previousMonth).split(" ")[0]}`}
           subTone={spendChange > 0 ? "warn" : "good"}
         />
         <SummaryTile
-          label="Net"
+          label="Left over"
           value={formatCurrency(totals.net)}
-          sub={totals.net >= 0 ? "Saving this month" : "Spending more than earned"}
+          sub={
+            totals.net >= 0
+              ? `You saved ${formatCurrency(totals.net)}`
+              : `You spent ${formatCurrency(-totals.net)} more than you earned`
+          }
           subTone={totals.net >= 0 ? "good" : "warn"}
         />
         <SummaryTile
-          label="Needs review"
+          label="Needs a quick check"
           value={String(reviewCount)}
-          sub={reviewCount ? "Low-confidence categories" : "All categorized"}
+          sub={reviewCount ? "Categories to confirm" : "All sorted"}
           subTone={reviewCount ? "warn" : "good"}
         />
       </div>

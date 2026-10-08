@@ -8,10 +8,11 @@
  *  - account numbers are only ever stored masked (last 4)
  */
 
-// The app treats September 2026 as "this month" and August as "last month".
-// Once real data is in, these will come from today's date instead.
-export const CURRENT_MONTH = "2026-09";
-export const PREVIOUS_MONTH = "2026-08";
+// "This month" and "last month" come from today's date, as "YYYY-MM"
+const today = new Date();
+const toMonth = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+export const CURRENT_MONTH = toMonth(today);
+export const PREVIOUS_MONTH = toMonth(new Date(today.getFullYear(), today.getMonth() - 1, 1));
 
 // The fixed list of spending categories. id is what's stored on a transaction;
 // label is shown in the UI; icon matches a name in components/Icon.jsx; color is for charts.
@@ -160,9 +161,10 @@ export const STATEMENTS = [
   },
 ];
 
-// The signed-in user's profile, shown in the top bar and on Settings
+// The signed-in user's profile, shown in the top bar and on Settings.
+// Starts empty; FinanceProvider fills in the name and email from Firebase Auth.
 export const PROFILE = {
-  displayName: "Zach Sheppard",
-  email: "demo@ledger.app",
+  displayName: "",
+  email: "",
   createdAt: "2026-09-01",
 };
