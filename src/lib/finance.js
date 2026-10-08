@@ -31,6 +31,18 @@ export function addMonths(month, n) {
 }
 
 /**
+ * The month a page should open on: the newest month that has transactions, but
+ * never later than `currentMonth` (today). "" when there are no transactions.
+ * The home and Budget pages both use this, so they always open on the same month.
+ */
+export function latestMonthWithData(transactions, currentMonth) {
+  return transactions
+    .map((t) => t.date.slice(0, 7))
+    .filter((m) => m <= currentMonth)
+    .reduce((a, b) => (b > a ? b : a), "");
+}
+
+/**
  * Adds up a month's money in and out.
  * @returns {{income: number, spending: number, net: number}} spending is a positive number
  */
