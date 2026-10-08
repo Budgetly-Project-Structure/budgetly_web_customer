@@ -130,8 +130,22 @@ export default function FinanceProvider({ children }) {
     setBudgets((prev) => prev.filter((b) => !(b.categoryId === categoryId && b.month === CURRENT_MONTH)));
   }, []);
 
-  // Who is logged in? (null when logged out)
-  useEffect(() => onAuthStateChanged(auth, (user) => setUid(user?.uid ?? null)), []);
+  // Who is logged in? (null when logged out). Also shows their own name and
+  // email instead of placeholder profile data.
+  useEffect(
+    () =>
+      onAuthStateChanged(auth, (user) => {
+        setUid(user?.uid ?? null);
+        if (user) {
+          setProfile((p) => ({
+            ...p,
+            displayName: user.displayName || user.email?.split("@")[0] || "",
+            email: user.email ?? "",
+          }));
+        }
+      }),
+    []
+  );
 
   // Live transactions from Firestore. Until the first snapshot arrives,
   // transactionsLoading is true so pages don't flash "no data yet".

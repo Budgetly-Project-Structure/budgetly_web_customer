@@ -21,6 +21,13 @@ export function needsReview(txn) {
   return !txn.isUserCorrected && (txn.category === "uncategorized" || txn.categoryConfidence < LOW_CONFIDENCE);
 }
 
+/** Moves a "YYYY-MM" month by n months: addMonths("2026-01", -1) → "2025-12" */
+export function addMonths(month, n) {
+  const [y, m] = month.split("-").map(Number);
+  const d = new Date(y, m - 1 + n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 /**
  * Adds up a month's money in and out.
  * @returns {{income: number, spending: number, net: number}} spending is a positive number
