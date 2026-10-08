@@ -7,12 +7,13 @@
  * What it provides:
  *   Data:    categories, accounts, currentMonth, previousMonth,
  *            transactions, budgets, statements (import history), profile, lastImport
- *   Actions: updateTransactionCategory, setBudgetLimit, removeBudget,
+ *   Actions: updateTransactionCategory, setBudgetLimit, removeBudget, addCategory,
  *            addStatement, updateStatement, removeStatement, setProfile
  *
  * Transactions and import history are live from Firestore (onSnapshot).
  * Budgets and profile still start as mock data and live in React state, so
- * changes to those are lost on refresh. The plan is to swap them for Firestore
+ * changes to those are lost on refresh. Categories the user makes are kept in
+ * this browser (localStorage) until they move to Firestore too. The plan is to swap them for Firestore
  * here too; the pages won't need to change.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -81,6 +82,18 @@ function transactionFromDoc(d) {
 // read-only), so "Dismiss" just hides them. We remember that per user, per device.
 const dismissedKey = (uid) => `budgetly.dismissedImports.${uid}`;
 
+// Categories the user made themselves, also per user, per device (until Firestore)
+const customCategoriesKey = (uid) => `budgetly.customCategories.${uid}`;
+
+function loadCustomCategories(uid) {
+  try {
+    const list = JSON.parse(localStorage.getItem(customCategoriesKey(uid)) ?? "[]");
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
 function loadDismissed(uid) {
   try {
     return new Set(JSON.parse(localStorage.getItem(dismissedKey(uid)) ?? "[]"));
@@ -107,6 +120,7 @@ export default function FinanceProvider({ children }) {
   const [dismissedIds, setDismissedIds] = useState(() => new Set());
   const [uid, setUid] = useState(null);
   const [profile, setProfile] = useState(PROFILE);
+  const [customCategories, setCustomCategories] = useState([]);
 
   /**
    * Sets this month's limit for a category: updates the budget if it exists,
@@ -129,6 +143,46 @@ export default function FinanceProvider({ children }) {
   const removeBudget = useCallback((categoryId) => {
     setBudgets((prev) => prev.filter((b) => !(b.categoryId === categoryId && b.month === CURRENT_MONTH)));
   }, []);
+
+  // Built-in categories, then the user's own. A transaction can point at a custom
+  // category this browser doesn't know (made on another device), so those get a
+  // plain placeholder instead of breaking the pages.
+  const categories = useMemo(() => {
+    const list = [...CATEGORIES, ...customCategories];
+    const known = new Set(list.map((c) => c.id));
+    const missing = [...new Set((serverTransactions ?? []).map((t) => t.category))].filter((id) => !known.has(id));
+    return [
+      ...list,
+      ...missing.map((id) => ({ id, label: id.replace(/^custom-/, "").replace(/-/g, " "), icon: "uncategorized", color: "#8C9296" })),
+    ];
+  }, [customCategories, serverTransactions]);
+
+  /**
+   * Makes a new category the user named. The id is "custom-" + the name in
+   * lowercase-with-dashes, so it can never clash with a built-in id.
+   * Returns the new category, or null if the name is empty or already used.
+   */
+  const addCategory = useCallback(
+    ({ label, color }) => {
+      const name = label.trim().slice(0, 30);
+      const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+      if (!slug) return null;
+      const id = `custom-${slug}`;
+      const all = [...CATEGORIES, ...customCategories];
+      if (all.some((c) => c.id === id || c.label.toLowerCase() === name.toLowerCase())) return null;
+      const category = { id, label: name, icon: "uncategorized", color, isCustom: true };
+      // TODO (SCRUM-80): setDoc(doc(db, "users", uid, "categories", id), category)
+      const next = [...customCategories, category];
+      setCustomCategories(next);
+      try {
+        if (uid) localStorage.setItem(customCategoriesKey(uid), JSON.stringify(next));
+      } catch {
+        /* storage unavailable: the category lasts until a refresh */
+      }
+      return category;
+    },
+    [customCategories, uid]
+  );
 
   // Who is logged in? (null when logged out). Also shows their own name and
   // email instead of placeholder profile data.
@@ -196,11 +250,13 @@ export default function FinanceProvider({ children }) {
     if (!uid) {
       setServerImports(null);
       setPendingUploads([]);
+      setCustomCategories([]);
       return undefined;
     }
     setServerImports(null);
     setStatementsError(null);
     setDismissedIds(loadDismissed(uid));
+    setCustomCategories(loadCustomCategories(uid));
     const q = query(collection(db, "users", uid, "imports"), orderBy("uploadedAt", "desc"));
     return onSnapshot(
       q,
@@ -257,7 +313,7 @@ export default function FinanceProvider({ children }) {
 
   const value = useMemo(
     () => ({
-      categories: CATEGORIES,
+      categories,
       accounts: ACCOUNTS,
       currentMonth: CURRENT_MONTH,
       previousMonth: PREVIOUS_MONTH,
@@ -273,12 +329,14 @@ export default function FinanceProvider({ children }) {
       updateTransactionCategory,
       setBudgetLimit,
       removeBudget,
+      addCategory,
       addStatement,
       updateStatement,
       removeStatement,
       setProfile,
     }),
     [
+      categories,
       transactions,
       transactionsLoading,
       transactionsError,
@@ -291,6 +349,7 @@ export default function FinanceProvider({ children }) {
       updateTransactionCategory,
       setBudgetLimit,
       removeBudget,
+      addCategory,
       addStatement,
       updateStatement,
       removeStatement,

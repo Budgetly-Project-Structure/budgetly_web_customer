@@ -4,6 +4,8 @@
 //   - amount < 0 is spending, amount > 0 is income
 //   - month is a "YYYY-MM" string and txn.date is "YYYY-MM-DD", so a startsWith() check finds a month
 
+import { formatCurrency } from "./format";
+
 // If the AI is less than 70% sure of a category, the transaction is flagged for review
 export const LOW_CONFIDENCE = 0.7;
 
@@ -91,6 +93,95 @@ export function budgetRows(budgets, transactions, month, categories) {
         status: budgetStatus(s, b.limit),
       };
     });
+}
+
+// Auto budget groups. Fixed bills keep their full average; flexible spending
+// (and any category the user made) is trimmed 10% so there's room to save.
+const FIXED_CATEGORIES = ["housing", "rent", "utilities", "subscriptions", "insurance"];
+const FLEXIBLE_CATEGORIES = ["dining", "shopping", "entertainment"];
+// Not spending, so they never get a budget
+const NO_BUDGET_CATEGORIES = ["income", "transfer", "transfers", "uncategorized"];
+// Share of monthly income the auto budget may use; the rest is left for savings
+const AUTO_BUDGET_INCOME_SHARE = 0.8;
+
+const roundUpTo5 = (n) => Math.ceil(n / 5) * 5;
+const roundTo5 = (n) => Math.max(5, Math.round(n / 5) * 5);
+
+/**
+ * Suggests a monthly limit per spending category from past spending ("Auto budget").
+ * Plain math, no AI call, so it's free and the same input always gives the same answer.
+ *
+ * How it works:
+ *   1. Looks at up to 3 of the most recent months before `month` that have spending.
+ *      If there are none, it uses `month` itself.
+ *   2. Averages each category's monthly spending over those months.
+ *   3. Fixed bills (rent, utilities, subscriptions, insurance): average rounded up to $5.
+ *      Flexible (dining, shopping, entertainment, custom categories): average minus 10%, rounded to $5.
+ *      Everything else: average rounded up to $5.
+ *   4. If the total is more than 80% of monthly income, flexible categories are scaled
+ *      down so the total fits (fixed bills are never cut). Income is `monthlyIncome` when
+ *      given, otherwise the average money in over the same months.
+ *
+ * @param {Object[]} transactions
+ * @param {string}   month           "YYYY-MM" the budget is for
+ * @param {Object[]} categories
+ * @param {number}   [monthlyIncome]  Overrides the income worked out from transactions
+ * @returns {{rows: {categoryId: string, average: number, limit: number, kind: "fixed"|"flexible"|"other", reason: string}[],
+ *            total: number, months: string[], income: number, capped: boolean}}
+ *          rows is empty when there's no spending to learn from
+ */
+export function suggestBudgets(transactions, month, categories, monthlyIncome) {
+  // Months before `month` that have spending, newest first
+  const pastMonths = [
+    ...new Set(transactions.filter((t) => t.amount < 0 && t.date.slice(0, 7) < month).map((t) => t.date.slice(0, 7))),
+  ]
+    .sort()
+    .reverse()
+    .slice(0, 3);
+  const months = pastMonths.length ? pastMonths : [month];
+
+  // Average spending per category, and average income, over those months
+  const totals = {};
+  let incomeTotal = 0;
+  for (const m of months) {
+    for (const [id, amount] of Object.entries(spendingByCategory(transactions, m))) {
+      totals[id] = (totals[id] || 0) + amount;
+    }
+    incomeTotal += monthTotals(transactions, m).income;
+  }
+  const income = monthlyIncome > 0 ? monthlyIncome : incomeTotal / months.length;
+  const over = months.length === 1 ? "last month" : `${months.length} months`;
+  const kindOf = (id) =>
+    FIXED_CATEGORIES.includes(id) ? "fixed" : FLEXIBLE_CATEGORIES.includes(id) || id.startsWith("custom-") ? "flexible" : "other";
+
+  const rows = categories
+    .filter((c) => !NO_BUDGET_CATEGORIES.includes(c.id) && totals[c.id] > 0)
+    .map((c) => {
+      const average = totals[c.id] / months.length;
+      const kind = kindOf(c.id);
+      const avgText = `avg ${formatCurrency(average)} over ${over}`;
+      return kind === "flexible"
+        ? { categoryId: c.id, average, kind, limit: roundTo5(average * 0.9), reason: `${avgText}, trimmed 10%` }
+        : { categoryId: c.id, average, kind, limit: roundUpTo5(average), reason: kind === "fixed" ? `${avgText}, a regular bill` : avgText };
+    });
+
+  // Keep the total under 80% of income by shrinking only the flexible categories
+  const cap = income * AUTO_BUDGET_INCOME_SHARE;
+  let total = rows.reduce((s, r) => s + r.limit, 0);
+  let capped = false;
+  const flexTotal = rows.filter((r) => r.kind === "flexible").reduce((s, r) => s + r.limit, 0);
+  if (income > 0 && total > cap && flexTotal > 0) {
+    const factor = Math.max(0, cap - (total - flexTotal)) / flexTotal;
+    for (const r of rows) {
+      if (r.kind !== "flexible") continue;
+      r.limit = Math.max(5, Math.floor((r.limit * factor) / 5) * 5);
+      r.reason = `avg ${formatCurrency(r.average)} over ${over}, cut to leave 20% of income for savings`;
+    }
+    total = rows.reduce((s, r) => s + r.limit, 0);
+    capped = true;
+  }
+
+  return { rows, total, months, income, capped };
 }
 
 /**
