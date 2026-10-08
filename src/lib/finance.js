@@ -95,42 +95,60 @@ export function budgetRows(budgets, transactions, month, categories) {
     });
 }
 
-// Auto budget groups. Fixed bills keep their full average; flexible spending
-// (and any category the user made) is trimmed 10% so there's room to save.
-const FIXED_CATEGORIES = ["housing", "rent", "utilities", "subscriptions", "insurance"];
-const FLEXIBLE_CATEGORIES = ["dining", "shopping", "entertainment"];
 // Not spending, so they never get a budget
 const NO_BUDGET_CATEGORIES = ["income", "transfer", "transfers", "uncategorized"];
-// Share of monthly income the auto budget may use; the rest is left for savings
-const AUTO_BUDGET_INCOME_SHARE = 0.8;
 
-const roundUpTo5 = (n) => Math.ceil(n / 5) * 5;
-const roundTo5 = (n) => Math.max(5, Math.round(n / 5) * 5);
+const roundTo5 = (n) => Math.round(n / 5) * 5;
 
 /**
- * Suggests a monthly limit per spending category from past spending ("Auto budget").
- * Plain math, no AI call, so it's free and the same input always gives the same answer.
+ * Takes `amount` dollars out of the rows as evenly as possible: the same amount
+ * from each, never below $0. A row that hits $0 stops there, and the rest of its
+ * share is split evenly over the rows that still have money. Changes rows in place.
+ */
+function takeEvenly(rows, amount) {
+  let left = amount;
+  for (;;) {
+    const open = rows.filter((r) => r.limit > 0);
+    if (left <= 0 || open.length === 0) break;
+    // Whole dollars; the first few rows give $1 more when it doesn't divide evenly
+    const share = Math.floor(left / open.length);
+    let extra = left - share * open.length;
+    for (const r of open) {
+      const want = share + (extra > 0 ? 1 : 0);
+      if (extra > 0) extra -= 1;
+      const take = Math.min(want, r.limit);
+      r.limit -= take;
+      r.savingsCut += take;
+      left -= take;
+    }
+  }
+}
+
+/**
+ * Suggests a monthly limit per spending category ("Auto budget"). Plain math,
+ * no AI call, so it's free and the same input always gives the same answer.
  *
  * How it works:
  *   1. Looks at up to 3 of the most recent months before `month` that have spending.
- *      If there are none, it uses `month` itself.
- *   2. Averages each category's monthly spending over those months.
- *   3. Fixed bills (rent, utilities, subscriptions, insurance): average rounded up to $5.
- *      Flexible (dining, shopping, entertainment, custom categories): average minus 10%, rounded to $5.
- *      Everything else: average rounded up to $5.
- *   4. If the total is more than 80% of monthly income, flexible categories are scaled
- *      down so the total fits (fixed bills are never cut). Income is `monthlyIncome` when
- *      given, otherwise the average money in over the same months.
+ *      If there are none, it uses `month` itself. Averages each category's spending.
+ *   2. Spreads ALL of the money in over the categories, in proportion to what you
+ *      usually spend in each. Limits are rounded to $5, and the rounding difference
+ *      goes on the biggest category so the limits add up to exactly the money in.
+ *   3. `savings` (optional) is taken out of the categories evenly: the same dollar
+ *      amount from each, none going below $0. So the limits add up to money in - savings.
+ *   With no money in at all, each category just gets its average (rounded up to $5).
  *
  * @param {Object[]} transactions
- * @param {string}   month           "YYYY-MM" the budget is for
+ * @param {string}   month            "YYYY-MM" the budget is for
  * @param {Object[]} categories
- * @param {number}   [monthlyIncome]  Overrides the income worked out from transactions
- * @returns {{rows: {categoryId: string, average: number, limit: number, kind: "fixed"|"flexible"|"other", reason: string}[],
- *            total: number, months: string[], income: number, capped: boolean}}
+ * @param {number}   [monthlyIncome]  Money in to budget. If not given (or 0), the average
+ *                                    money in over the same months is used
+ * @param {number}   [savings=0]      Dollars to keep for savings instead of budgeting
+ * @returns {{rows: {categoryId: string, average: number, limit: number, reason: string}[],
+ *            total: number, months: string[], income: number, savings: number, fromIncome: boolean}}
  *          rows is empty when there's no spending to learn from
  */
-export function suggestBudgets(transactions, month, categories, monthlyIncome) {
+export function suggestBudgets(transactions, month, categories, monthlyIncome, savings = 0) {
   // Months before `month` that have spending, newest first
   const pastMonths = [
     ...new Set(transactions.filter((t) => t.amount < 0 && t.date.slice(0, 7) < month).map((t) => t.date.slice(0, 7))),
@@ -140,7 +158,7 @@ export function suggestBudgets(transactions, month, categories, monthlyIncome) {
     .slice(0, 3);
   const months = pastMonths.length ? pastMonths : [month];
 
-  // Average spending per category, and average income, over those months
+  // Total spending per category, and total income, over those months
   const totals = {};
   let incomeTotal = 0;
   for (const m of months) {
@@ -149,39 +167,48 @@ export function suggestBudgets(transactions, month, categories, monthlyIncome) {
     }
     incomeTotal += monthTotals(transactions, m).income;
   }
-  const income = monthlyIncome > 0 ? monthlyIncome : incomeTotal / months.length;
+  const income = Math.round(monthlyIncome > 0 ? monthlyIncome : incomeTotal / months.length);
   const over = months.length === 1 ? "last month" : `${months.length} months`;
-  const kindOf = (id) =>
-    FIXED_CATEGORIES.includes(id) ? "fixed" : FLEXIBLE_CATEGORIES.includes(id) || id.startsWith("custom-") ? "flexible" : "other";
 
   const rows = categories
     .filter((c) => !NO_BUDGET_CATEGORIES.includes(c.id) && totals[c.id] > 0)
-    .map((c) => {
-      const average = totals[c.id] / months.length;
-      const kind = kindOf(c.id);
-      const avgText = `avg ${formatCurrency(average)} over ${over}`;
-      return kind === "flexible"
-        ? { categoryId: c.id, average, kind, limit: roundTo5(average * 0.9), reason: `${avgText}, trimmed 10%` }
-        : { categoryId: c.id, average, kind, limit: roundUpTo5(average), reason: kind === "fixed" ? `${avgText}, a regular bill` : avgText };
-    });
+    .map((c) => ({ categoryId: c.id, average: totals[c.id] / months.length, limit: 0, savingsCut: 0 }));
+  if (rows.length === 0) return { rows: [], total: 0, months, income, savings: 0, fromIncome: income > 0 };
 
-  // Keep the total under 80% of income by shrinking only the flexible categories
-  const cap = income * AUTO_BUDGET_INCOME_SHARE;
-  let total = rows.reduce((s, r) => s + r.limit, 0);
-  let capped = false;
-  const flexTotal = rows.filter((r) => r.kind === "flexible").reduce((s, r) => s + r.limit, 0);
-  if (income > 0 && total > cap && flexTotal > 0) {
-    const factor = Math.max(0, cap - (total - flexTotal)) / flexTotal;
+  // No money in: nothing to spread, so fall back to the plain averages
+  if (income <= 0) {
     for (const r of rows) {
-      if (r.kind !== "flexible") continue;
-      r.limit = Math.max(5, Math.floor((r.limit * factor) / 5) * 5);
-      r.reason = `avg ${formatCurrency(r.average)} over ${over}, cut to leave 20% of income for savings`;
+      r.limit = Math.ceil(r.average / 5) * 5;
+      r.reason = `avg ${formatCurrency(r.average)} of spending over ${over}`;
+      delete r.savingsCut;
     }
-    total = rows.reduce((s, r) => s + r.limit, 0);
-    capped = true;
+    return { rows, total: rows.reduce((s, r) => s + r.limit, 0), months, income: 0, savings: 0, fromIncome: false };
   }
 
-  return { rows, total, months, income, capped };
+  // Spread all the money in, in proportion to the averages, then fix the rounding on the biggest
+  const avgTotal = rows.reduce((s, r) => s + r.average, 0);
+  for (const r of rows) r.limit = roundTo5((r.average / avgTotal) * income);
+  const biggest = rows.reduce((a, b) => (b.average > a.average ? b : a));
+  biggest.limit += income - rows.reduce((s, r) => s + r.limit, 0);
+  // Rounding can push a tiny category below $0 in theory; take it from the biggest instead
+  for (const r of rows) {
+    if (r.limit < 0) {
+      biggest.limit += r.limit;
+      r.limit = 0;
+    }
+  }
+
+  // Savings come out of every category evenly
+  const kept = Math.min(Math.max(0, Math.round(savings) || 0), income);
+  takeEvenly(rows, kept);
+
+  for (const r of rows) {
+    r.reason =
+      `avg ${formatCurrency(r.average)} of spending over ${over}, scaled to your income` +
+      (r.savingsCut ? `, minus ${formatCurrency(r.savingsCut)} for savings` : "");
+    delete r.savingsCut;
+  }
+  return { rows, total: income - kept, months, income, savings: kept, fromIncome: true };
 }
 
 /**
