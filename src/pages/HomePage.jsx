@@ -157,24 +157,40 @@ export default function HomePage() {
             &gt;
           </button>
         </div>
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="font-mono text-4xl sm:text-5xl font-semibold text-green tabular-nums">
-            {formatCurrency(budgetedSpent)}
-          </span>
-          <span className="text-sm text-textMuted">of {formatCurrency(totalBudget)} budgeted</span>
-        </div>
-        <div className="mt-3 max-w-md">
-          {/* Progress bar: red over 100%, amber at 85%+, green otherwise. Width is capped at 100% */}
-          <div className="h-2 rounded-full bg-surface border border-line overflow-hidden">
-            <div
-              className={`h-full rounded-full ${pctUsed > 100 ? "bg-danger" : pctUsed >= 85 ? "bg-warn" : "bg-green"}`}
-              style={{ width: `${Math.min(100, pctUsed)}%` }}
-            />
+        {/* Budget summary: three labeled numbers, then a progress bar with one plain sentence */}
+        <div className="mt-3 bg-surface border border-line rounded-lg p-5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6">
+            <div>
+              <p className="text-xs text-textMuted mb-1">Spent so far</p>
+              <p className="font-mono text-3xl font-semibold text-textLight tabular-nums">{formatCurrency(budgetedSpent)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-textMuted mb-1">{leftToSpend >= 0 ? "Left to spend" : "Over budget by"}</p>
+              <p
+                className={`font-mono text-3xl font-semibold tabular-nums ${leftToSpend >= 0 ? "text-green" : "text-danger"}`}
+              >
+                {formatCurrency(Math.abs(leftToSpend))}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-textMuted mb-1">Total budget</p>
+              <p className="font-mono text-3xl font-semibold text-textLight tabular-nums">{formatCurrency(totalBudget)}</p>
+            </div>
           </div>
-          <p className="text-xs text-textMuted mt-2">
-            {Math.round(pctUsed)}% used ·{" "}
-            {leftToSpend >= 0 ? `${formatCurrency(leftToSpend)} left this month` : `${formatCurrency(-leftToSpend)} over`}
-          </p>
+          <div className="mt-5">
+            {/* Progress bar: red over 100%, amber at 85%+, green otherwise. Width is capped at 100% */}
+            <div className="h-2.5 rounded-full bg-charcoal border border-line overflow-hidden">
+              <div
+                className={`h-full rounded-full ${pctUsed > 100 ? "bg-danger" : pctUsed >= 85 ? "bg-warn" : "bg-green"}`}
+                style={{ width: `${Math.min(100, pctUsed)}%` }}
+              />
+            </div>
+            <p className="text-sm text-textMuted mt-2">
+              {totalBudget
+                ? `You've used ${Math.round(pctUsed)}% of your ${formatMonth(month).split(" ")[0]} budget.`
+                : "No budgets set yet. Add some on the Budget page."}
+            </p>
+          </div>
         </div>
       </div>
 
