@@ -2,7 +2,10 @@
  * BudgetPage.jsx
  *
  * The "/budget" page: monthly spending limits per category.
- *   - Three totals at the top: budgeted, spent so far, remaining (or over)
+ *   - Three totals at the top: the budget, spent so far, and left to spend (or over).
+ *     The budget is the month's money in, like the home page. Before any money has
+ *     come in this month, the most recent month's money in is used; with no money
+ *     in at all, it falls back to the total of the category limits.
  *   - A row per budget with a progress bar and status ("On track" / "Near limit" / "Over budget")
  *   - Click the pencil to edit a limit inline, or remove the budget
  *   - "No budget yet" lists categories without a limit, with a "+ Set budget" button
@@ -20,7 +23,7 @@ import { useState } from "react";
 import Icon from "../components/Icon";
 import { Card, CategoryIcon, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
-import { BUDGET_STATUS, budgetRows, spendingByCategory, suggestBudgets } from "../lib/finance";
+import { BUDGET_STATUS, budgetRows, monthTotals, spendingByCategory, suggestBudgets } from "../lib/finance";
 import { formatCurrency, formatMonth } from "../lib/format";
 
 // Maps a budget status to the StatusChip color tone
@@ -291,6 +294,24 @@ export default function BudgetPage() {
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0);
   const overCount = rows.filter((r) => r.status === "over").length;
 
+  // The budget is the money that came in. Early in a month (before payday) there may be
+  // none yet, so use the newest earlier month that had money in.
+  const thisMonth = monthTotals(transactions, currentMonth);
+  const incomeMonth =
+    thisMonth.income > 0
+      ? currentMonth
+      : transactions
+          .filter((t) => t.amount > 0 && t.date.slice(0, 7) < currentMonth)
+          .map((t) => t.date.slice(0, 7))
+          .reduce((a, b) => (b > a ? b : a), "");
+  const income = incomeMonth ? monthTotals(transactions, incomeMonth).income : 0;
+  const fromIncome = income > 0;
+  // With money in, every dollar out counts; without it, only spending in budgeted categories (as before)
+  const budgetTotal = fromIncome ? income : totalLimit;
+  const spentTotal = fromIncome ? thisMonth.spending : totalSpent;
+  const leftToSpend = budgetTotal - spentTotal;
+  const unassigned = income - totalLimit;
+
   // Spending per category this month, used for the "No budget yet" list
   const spent = spendingByCategory(transactions, currentMonth);
   // Categories with no budget yet. Income and Uncategorized can't have a budget.
@@ -300,7 +321,8 @@ export default function BudgetPage() {
 
   // Opens the Auto budget preview, or explains why it can't make one yet
   const openAutoBudget = () => {
-    const result = suggestBudgets(transactions, currentMonth, categories, profile.monthlyIncome);
+    // Same income as the totals above, so the 80% cap matches what the page shows
+    const result = suggestBudgets(transactions, currentMonth, categories, profile.monthlyIncome || income);
     if (result.rows.length) {
       setSuggestion(result);
       setAutoNote("");
@@ -342,20 +364,26 @@ export default function BudgetPage() {
         />
       )}
 
-      {/* Summary cards: budgeted, spent so far, remaining (or over) */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      {/* Summary cards: budget (money in), spent so far, left to spend (or over) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-surface border border-line rounded-lg p-4">
-          <p className="text-xs text-textMuted mb-2">Budgeted</p>
-          <p className="font-mono text-xl tabular-nums">{formatCurrency(totalLimit)}</p>
+          <p className="text-xs text-textMuted mb-2">
+            {!fromIncome
+              ? "Budget (category limits)"
+              : incomeMonth === currentMonth
+                ? "Budget (money in)"
+                : `Budget (money in, ${formatMonth(incomeMonth).split(" ")[0]})`}
+          </p>
+          <p className="font-mono text-xl tabular-nums">{formatCurrency(budgetTotal)}</p>
         </div>
         <div className="bg-surface border border-line rounded-lg p-4">
           <p className="text-xs text-textMuted mb-2">Spent so far</p>
-          <p className="font-mono text-xl tabular-nums">{formatCurrency(totalSpent)}</p>
+          <p className="font-mono text-xl tabular-nums">{formatCurrency(spentTotal)}</p>
         </div>
         <div className="bg-surface border border-line rounded-lg p-4">
-          <p className="text-xs text-textMuted mb-2">{totalLimit - totalSpent >= 0 ? "Remaining" : "Over"}</p>
-          <p className={`font-mono text-xl tabular-nums ${totalLimit - totalSpent >= 0 ? "text-green" : "text-danger"}`}>
-            {formatCurrency(Math.abs(totalLimit - totalSpent))}
+          <p className="text-xs text-textMuted mb-2">{leftToSpend >= 0 ? "Left to spend" : "Over budget by"}</p>
+          <p className={`font-mono text-xl tabular-nums ${leftToSpend >= 0 ? "text-green" : "text-danger"}`}>
+            {formatCurrency(Math.abs(leftToSpend))}
           </p>
           {overCount > 0 && (
             <p className="text-xs text-danger mt-1 flex items-center gap-1">
@@ -364,6 +392,14 @@ export default function BudgetPage() {
           )}
         </div>
       </div>
+      {/* How the money in compares to the category limits below */}
+      <p className="mt-3 mb-6 text-sm text-textMuted">
+        {!fromIncome
+          ? "No money in yet, so the budget is your category limits added up. It switches to your money in once a deposit shows up."
+          : unassigned >= 0
+            ? `${formatCurrency(totalLimit)} of ${formatCurrency(income)} assigned to categories, ${formatCurrency(unassigned)} unassigned.`
+            : `Your category limits add up to ${formatCurrency(totalLimit)}, ${formatCurrency(-unassigned)} more than came in.`}
+      </p>
 
       {/* Budgeted categories, highest % used first */}
       <Card title="Categories" padded={false}>
