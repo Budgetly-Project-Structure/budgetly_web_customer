@@ -8,7 +8,7 @@
  *   Data:    categories, accounts, currentMonth, previousMonth,
  *            transactions, budgets, statements (import history), profile, lastImport
  *   Actions: updateTransactionCategory, setBudgetLimit, removeBudget, addCategory,
- *            addStatement, updateStatement, removeStatement, setProfile
+ *            addStatement, updateStatement, removeStatement, deleteStatement, setProfile
  *
  * Transactions and import history are live from Firestore (onSnapshot).
  * Budgets and profile still start as mock data and live in React state, so
@@ -19,7 +19,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
-import { auth, db } from "../lib/firebase";
+import { httpsCallable } from "firebase/functions";
+import { auth, db, functions } from "../lib/firebase";
 import { FinanceContext } from "./FinanceContext";
 import {
   ACCOUNTS,
@@ -50,6 +51,7 @@ function statementFromDoc(d) {
     error: x.error ?? null, // user-facing message when status is "failed"
     size: x.sizeBytes ?? 0,
     storagePath: x.storagePath ?? null,
+    fromServer: true, // a real import record (rows still uploading from this browser don't have this)
     uploadedAt: x.uploadedAt?.toDate?.().toISOString() ?? new Date().toISOString(),
   };
 }
@@ -299,6 +301,24 @@ export default function FinanceProvider({ children }) {
     [uid]
   );
 
+  /**
+   * Permanently deletes a server import: its transactions, its file in Storage and
+   * the import record (the deleteImport Cloud Function does all three). The live
+   * listeners above then drop the row and the transactions by themselves.
+   * Throws an Error with a message that can be shown to the user.
+   */
+  const deleteStatement = useCallback(async (id) => {
+    try {
+      const { data } = await httpsCallable(functions, "deleteImport")({ importId: id });
+      return data; // { deletedTransactions }
+    } catch (err) {
+      console.error("Could not delete import:", err.code, err.message);
+      // The function's own errors (not found, still importing...) have readable messages
+      const readable = ["functions/not-found", "functions/failed-precondition", "functions/permission-denied", "functions/unauthenticated"];
+      throw new Error(readable.includes(err.code) ? err.message : "We couldn't delete this statement. Please try again.");
+    }
+  }, []);
+
   const statements = useMemo(() => {
     const serverPaths = new Set((serverImports ?? []).map((s) => s.storagePath));
     // Hide a pending row once the server has its own doc for the same file
@@ -333,6 +353,7 @@ export default function FinanceProvider({ children }) {
       addStatement,
       updateStatement,
       removeStatement,
+      deleteStatement,
       setProfile,
     }),
     [
@@ -353,6 +374,7 @@ export default function FinanceProvider({ children }) {
       addStatement,
       updateStatement,
       removeStatement,
+      deleteStatement,
     ]
   );
 

@@ -3,6 +3,7 @@
 import { initializeApp } from "firebase/app";
 import { connectAuthEmulator, getAuth } from "firebase/auth";
 import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
+import { connectFunctionsEmulator, getFunctions } from "firebase/functions";
 import { connectStorageEmulator, getStorage } from "firebase/storage";
 
 // Values come from the .env file (kept out of Git)
@@ -20,6 +21,7 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);        // login / signup
 export const db = getFirestore(app);     // database
 export const storage = getStorage(app);  // uploaded statement files
+export const functions = getFunctions(app); // callable Cloud Functions (e.g. deleteImport)
 
 // Local testing: set VITE_USE_EMULATORS=true in .env.local (git-ignored) to use the
 // Firebase emulators (run `firebase emulators:start` in budgetly_backend_nodejs)
@@ -28,4 +30,5 @@ if (import.meta.env.VITE_USE_EMULATORS === "true") {
   connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
   connectStorageEmulator(storage, "127.0.0.1", 9199);
+  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
 }

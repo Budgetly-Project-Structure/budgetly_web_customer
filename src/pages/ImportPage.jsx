@@ -14,6 +14,11 @@
  *      creates an Import record in Firestore, parses the file, saves the
  *      transactions, and sets the record to "completed" or "failed".
  *
+ * Delete: finished imports (completed, partly read, or failed) have a Delete
+ * button. After a confirm dialog it calls deleteStatement() (the deleteImport
+ * Cloud Function), which removes the file, the import record and every
+ * transaction from it; the live listeners then update every page.
+ *
  * Import history is live: FinanceProvider listens to users/{uid}/imports in
  * Firestore, so status changes (processing, completed, failed) appear here
  * without a refresh, and the history survives a page reload. A row for a file
@@ -57,6 +62,58 @@ const STATUS = {
  * @param {number} n  Size in bytes
  * @returns {string}
  */
+/**
+ * "Are you sure?" dialog for deleting a statement. Escape or Cancel closes it.
+ *
+ * @param {Object}  statement  The Import history row being deleted
+ * @param {boolean} deleting   True while the delete is running (buttons disabled)
+ * @param {string}  [error]    Shown if the delete failed
+ * @param {() => void} onConfirm
+ * @param {() => void} onCancel
+ */
+function ConfirmDelete({ statement, deleting, error, onConfirm, onCancel }) {
+  const n = statement.transactionCount;
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+      onKeyDown={(e) => e.key === "Escape" && !deleting && onCancel()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-title"
+        className="w-full max-w-md bg-surface border border-line rounded-lg p-5"
+      >
+        <h2 id="delete-title" className="text-base font-semibold text-textLight">
+          Delete this statement?
+        </h2>
+        <p className="text-sm text-textMuted mt-2 break-words">
+          This removes <span className="text-textLight">{statement.fileName}</span>
+          {n > 0 ? ` and its ${n} ${n === 1 ? "transaction" : "transactions"}` : ""}. This can't be undone.
+        </p>
+        {error && (
+          <p className="text-sm text-danger mt-3" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="flex justify-end gap-2 mt-5">
+          <button type="button" autoFocus onClick={onCancel} disabled={deleting} className={buttonStyles.secondary}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={deleting}
+            className="inline-flex items-center justify-center gap-2 bg-danger text-charcoal font-medium text-sm rounded-md px-4 py-2 hover:bg-danger/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            {deleting ? "Deleting…" : "Delete"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
@@ -65,8 +122,16 @@ function formatBytes(n) {
 
 export default function ImportPage() {
   // Shared app data. statements = the Import history rows shown below.
-  const { statements, statementsLoading, statementsError, accounts, addStatement, updateStatement, removeStatement } =
-    useFinance();
+  const {
+    statements,
+    statementsLoading,
+    statementsError,
+    accounts,
+    addStatement,
+    updateStatement,
+    removeStatement,
+    deleteStatement,
+  } = useFinance();
 
   // Which bank account the next upload is for. Defaults to the first account.
   const [accountId, setAccountId] = useState(accounts[0].id);
@@ -79,6 +144,25 @@ export default function ImportPage() {
 
   // Upload progress per history row: { [statementId]: 0..100 }
   const [progress, setProgress] = useState({});
+
+  // Delete: the row waiting for confirmation (null = dialog closed), whether the
+  // delete is running, and the error to show if it failed
+  const [toDelete, setToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
+  async function confirmDelete() {
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await deleteStatement(toDelete.id);
+      setToDelete(null); // the live listener removes the row
+    } catch (err) {
+      setDeleteError(err.message);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   // The hidden <input type="file">. The "Browse files" button clicks it.
   const inputRef = useRef(null);
@@ -278,6 +362,20 @@ export default function ImportPage() {
                     <StatusChip tone={st.tone} icon={st.icon}>
                       {st.label}
                     </StatusChip>
+                    {/* Only finished imports the server knows about can be deleted */}
+                    {s.fromServer && (s.status === "completed" || s.status === "failed") && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteError("");
+                          setToDelete(s);
+                        }}
+                        className="p-1.5 rounded-md text-textMuted hover:text-danger hover:bg-raised"
+                        aria-label={`Delete ${s.fileName}`}
+                      >
+                        <Icon name="trash" className="w-4 h-4" />
+                      </button>
+                    )}
                   </div>
 
                   {/* ---------- Status-specific details (one shows at a time) ---------- */}
@@ -310,9 +408,12 @@ export default function ImportPage() {
                         <button onClick={() => inputRef.current?.click()} className="text-xs text-textLight hover:underline">
                           Try again
                         </button>
-                        <button onClick={() => removeStatement(s.id)} className="text-xs text-textMuted hover:text-textLight">
-                          Dismiss
-                        </button>
+                        {/* Server imports have Delete above; a failed upload from this browser can only be hidden */}
+                        {!s.fromServer && (
+                          <button onClick={() => removeStatement(s.id)} className="text-xs text-textMuted hover:text-textLight">
+                            Dismiss
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -350,6 +451,16 @@ export default function ImportPage() {
           </ul>
         )}
       </Card>
+
+      {toDelete && (
+        <ConfirmDelete
+          statement={toDelete}
+          deleting={deleting}
+          error={deleteError}
+          onConfirm={confirmDelete}
+          onCancel={() => setToDelete(null)}
+        />
+      )}
     </div>
   );
 }
