@@ -157,8 +157,11 @@ function takeEvenly(rows, amount) {
  *                                    money in over the same months is used
  * @param {number}   [savings=0]      Dollars to keep for savings instead of budgeting
  * @returns {{rows: {categoryId: string, average: number, limit: number, reason: string}[],
- *            total: number, months: string[], income: number, savings: number, fromIncome: boolean}}
- *          rows is empty when there's no spending to learn from
+ *            total: number, months: string[], income: number, savings: number, fromIncome: boolean,
+ *            uncategorized: number}}
+ *          rows is empty when there's no categorized spending to learn from. uncategorized is
+ *          the spending in those months that has no category yet, which is left out
+ *          (imports are all "uncategorized" until the user or the AI step sets categories)
  */
 export function suggestBudgets(transactions, month, categories, monthlyIncome, savings = 0) {
   // Months before `month` that have spending, newest first
@@ -180,12 +183,13 @@ export function suggestBudgets(transactions, month, categories, monthlyIncome, s
     incomeTotal += monthTotals(transactions, m).income;
   }
   const income = Math.round(monthlyIncome > 0 ? monthlyIncome : incomeTotal / months.length);
+  const uncategorized = totals.uncategorized || 0;
   const over = months.length === 1 ? "last month" : `${months.length} months`;
 
   const rows = categories
     .filter((c) => !NO_BUDGET_CATEGORIES.includes(c.id) && totals[c.id] > 0)
     .map((c) => ({ categoryId: c.id, average: totals[c.id] / months.length, limit: 0, savingsCut: 0 }));
-  if (rows.length === 0) return { rows: [], total: 0, months, income, savings: 0, fromIncome: income > 0 };
+  if (rows.length === 0) return { rows: [], total: 0, months, income, savings: 0, fromIncome: income > 0, uncategorized };
 
   // No money in: nothing to spread, so fall back to the plain averages
   if (income <= 0) {
@@ -194,7 +198,7 @@ export function suggestBudgets(transactions, month, categories, monthlyIncome, s
       r.reason = `avg ${formatCurrency(r.average)} of spending over ${over}`;
       delete r.savingsCut;
     }
-    return { rows, total: rows.reduce((s, r) => s + r.limit, 0), months, income: 0, savings: 0, fromIncome: false };
+    return { rows, total: rows.reduce((s, r) => s + r.limit, 0), months, income: 0, savings: 0, fromIncome: false, uncategorized };
   }
 
   // Spread all the money in, in proportion to the averages, then fix the rounding on the biggest
@@ -220,7 +224,7 @@ export function suggestBudgets(transactions, month, categories, monthlyIncome, s
       (r.savingsCut ? `, minus ${formatCurrency(r.savingsCut)} for savings` : "");
     delete r.savingsCut;
   }
-  return { rows, total: income - kept, months, income, savings: kept, fromIncome: true };
+  return { rows, total: income - kept, months, income, savings: kept, fromIncome: true, uncategorized };
 }
 
 /**

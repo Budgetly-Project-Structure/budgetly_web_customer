@@ -26,6 +26,7 @@
  * for now (later: Firestore).
  */
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
 import { Card, CategoryIcon, MonthSwitcher, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
@@ -115,7 +116,7 @@ function AutoBudgetPreview({
   onApply,
   onCancel,
 }) {
-  const { rows, total, months, income, fromIncome } = suggestion;
+  const { rows, total, months, income, fromIncome, uncategorized } = suggestion;
   const catById = (id) => categories.find((c) => c.id === id);
   const monthNames = months.map((m) => formatMonth(m).split(" ")[0]).join(", ");
   return (
@@ -124,6 +125,17 @@ function AutoBudgetPreview({
         {fromIncome
           ? `All of your money in is split across your categories, based on how you spent in ${monthNames}. Want to save some? Enter it below and it comes out of every category evenly.`
           : `No money in yet, so each category gets what you usually spend there (from ${monthNames}). Once a deposit shows up, Auto budget will use your money in instead.`}
+        {uncategorized > 0 && (
+          <>
+            {" "}
+            <span className="text-warn">
+              {formatCurrency(uncategorized)} of spending isn't categorized yet and wasn't included.
+            </span>{" "}
+            <Link to="/transactions" className="text-green hover:underline">
+              Set categories
+            </Link>
+          </>
+        )}
       </p>
 
       {fromIncome && (
@@ -369,7 +381,8 @@ export default function BudgetPage() {
   // a note when there's nothing to go on, and the savings last applied (to label "unassigned")
   const [autoOpen, setAutoOpen] = useState(false);
   const [savingsInput, setSavingsInput] = useState("");
-  const [autoNote, setAutoNote] = useState("");
+  // { text, link? } shown instead of the preview when Auto budget can't run
+  const [autoNote, setAutoNote] = useState(null);
   const [appliedSavings, setAppliedSavings] = useState(0);
   const [addingCategory, setAddingCategory] = useState(false);
 
@@ -419,13 +432,24 @@ export default function BudgetPage() {
 
   // Opens the Auto budget preview, or explains why it can't make one yet
   const openAutoBudget = () => {
-    if (suggestBudgets(transactions, month, categories, autoIncome).rows.length) {
+    const { rows: suggested, uncategorized } = suggestBudgets(transactions, month, categories, autoIncome);
+    if (suggested.length) {
       setAutoOpen(true);
       setSavingsInput("");
-      setAutoNote("");
+      setAutoNote(null);
+      return;
+    }
+    setAutoOpen(false);
+    if (transactions.length === 0) {
+      setAutoNote({ text: "Auto budget learns from your spending. Import a bank statement first, then try again." });
+    } else if (uncategorized > 0) {
+      // Imports arrive uncategorized until categories are set, so there's nothing to split yet
+      setAutoNote({
+        text: "Your transactions don't have categories yet, so Auto budget can't split them. Set categories on the Transactions page, or wait for auto-categorization.",
+        link: { to: "/transactions", label: "Go to Transactions" },
+      });
     } else {
-      setAutoOpen(false);
-      setAutoNote("Auto budget learns from your spending. Import a bank statement first, then try again.");
+      setAutoNote({ text: `There's no spending in ${monthName} for Auto budget to learn from. Try another month with the arrows.` });
     }
   };
 
@@ -453,6 +477,7 @@ export default function BudgetPage() {
                 onChange={(m) => {
                   setPickedMonth(m);
                   setAutoOpen(false); // the preview was for the old month
+                  setAutoNote(null);
                 }}
               />
             </span>
@@ -464,7 +489,17 @@ export default function BudgetPage() {
       />
 
       {autoNote && (
-        <p className="mb-6 text-sm text-textMuted bg-surface border border-line rounded-lg px-4 py-3">{autoNote}</p>
+        <p className="mb-6 text-sm text-textMuted bg-surface border border-line rounded-lg px-4 py-3">
+          {autoNote.text}
+          {autoNote.link && (
+            <>
+              {" "}
+              <Link to={autoNote.link.to} className="text-green hover:underline">
+                {autoNote.link.label}
+              </Link>
+            </>
+          )}
+        </p>
       )}
       {suggestion && (
         <AutoBudgetPreview
