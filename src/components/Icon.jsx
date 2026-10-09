@@ -75,6 +75,7 @@ const PATHS = {
   income: "M12 3v18M17 7.5C17 5.6 14.8 4.5 12 4.5S7 5.6 7 7.5s2 2.8 5 3.5 5 1.6 5 3.5-2.2 3-5 3-5-1.1-5-3",
   // Question-mark circle. Also used as the fallback for unknown icon names (see below),
   // and matches the "Uncategorized" fallback when AI categorization fails.
+  transfers: "M4 7h13l-3-3M20 17H7l3 3",
   uncategorized: "M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z",
 };
 

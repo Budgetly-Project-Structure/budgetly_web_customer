@@ -197,6 +197,7 @@ export default function ImportPage() {
     try {
       const storagePath = await uploadStatement(file, {
         accountId,
+        accountType: accounts.find((a) => a.id === accountId)?.type,
         onProgress: (pct) => setProgress((p) => ({ ...p, [id]: pct })),
       });
       updateStatement(id, { status: "uploaded", storagePath });

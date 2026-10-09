@@ -32,6 +32,7 @@ import {
   addMonths,
   budgetRows,
   generateInsights,
+  isTransfer,
   latestMonthWithData,
   monthTotals,
   needsReview,
@@ -127,7 +128,7 @@ export default function HomePage() {
     .sort((a, b) => b.date.localeCompare(a.date))
     .slice(0, 6);
   // Counts for the tile sub-lines
-  const depositCount = transactions.filter((t) => t.date.startsWith(month) && t.amount > 0).length;
+  const depositCount = transactions.filter((t) => t.date.startsWith(month) && t.amount > 0 && !isTransfer(t)).length;
   const reviewCount =transactions.filter((t) => t.date.startsWith(month) && needsReview(t)).length;
 
   // Budgets that need attention first, then the biggest ones

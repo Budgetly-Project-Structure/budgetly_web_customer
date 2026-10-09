@@ -26,13 +26,17 @@ export const CATEGORIES = [
   { id: "entertainment", label: "Entertainment", icon: "entertainment", color: "#D65B8D" },
   { id: "health", label: "Health", icon: "health", color: "#8DD65B" },
   { id: "income", label: "Income", icon: "income", color: "#39D67A" },
+  // Money moved between your own accounts, e.g. paying off a credit card. Not income or spending.
+  { id: "transfers", label: "Transfer", icon: "transfers", color: "#6E8FD6" },
   { id: "uncategorized", label: "Uncategorized", icon: "uncategorized", color: "#8C9296" },
 ];
 
 // The user's bank accounts. Only the last 4 digits are ever stored (ui-constraints.md).
+// type tells the importer how to read the statement: "credit" cards may list purchases
+// as positive numbers, and their payment lines are transfers.
 export const ACCOUNTS = [
-  { id: "acct-checking", name: "Checking", last4: "4521" },
-  { id: "acct-credit", name: "Credit Card", last4: "8830" },
+  { id: "acct-checking", name: "Checking", last4: "4521", type: "checking" },
+  { id: "acct-credit", name: "Credit Card", last4: "8830", type: "credit" },
 ];
 
 // Sample transactions, written as short arrays to keep the file readable.
