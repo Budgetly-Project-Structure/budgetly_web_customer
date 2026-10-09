@@ -2,9 +2,16 @@
 
 // Conventions used throughout:
 //   - amount < 0 is spending, amount > 0 is income
+//   - except transfers (category "transfers", e.g. paying off a credit card), which
+//     just move money between the user's own accounts and count as neither
 //   - month is a "YYYY-MM" string and txn.date is "YYYY-MM-DD", so a startsWith() check finds a month
 
 import { formatCurrency } from "./format";
+
+/** True for a transfer between the user's own accounts (e.g. a credit card payment). */
+export function isTransfer(txn) {
+  return txn.category === "transfers";
+}
 
 // If the AI is less than 70% sure of a category, the transaction is flagged for review
 export const LOW_CONFIDENCE = 0.7;
@@ -50,7 +57,7 @@ export function monthTotals(transactions, month) {
   let income = 0;
   let spending = 0;
   for (const t of transactions) {
-    if (!inMonth(t, month)) continue;
+    if (!inMonth(t, month) || isTransfer(t)) continue;
     if (t.amount > 0) income += t.amount;
     else spending += -t.amount;
   }
@@ -61,7 +68,7 @@ export function monthTotals(transactions, month) {
 export function spendingByCategory(transactions, month) {
   const out = {};
   for (const t of transactions) {
-    if (!inMonth(t, month) || t.amount >= 0) continue;
+    if (!inMonth(t, month) || t.amount >= 0 || isTransfer(t)) continue;
     out[t.category] = (out[t.category] || 0) + -t.amount;
   }
   return out;
@@ -166,7 +173,7 @@ function takeEvenly(rows, amount) {
 export function suggestBudgets(transactions, month, categories, monthlyIncome, savings = 0) {
   // Months before `month` that have spending, newest first
   const pastMonths = [
-    ...new Set(transactions.filter((t) => t.amount < 0 && t.date.slice(0, 7) < month).map((t) => t.date.slice(0, 7))),
+    ...new Set(transactions.filter((t) => t.amount < 0 && !isTransfer(t) && t.date.slice(0, 7) < month).map((t) => t.date.slice(0, 7))),
   ]
     .sort()
     .reverse()
@@ -270,7 +277,7 @@ export function generateInsights(transactions, month, prevMonth, categories, bud
   // Top merchant by frequency
   const counts = {};
   for (const t of transactions) {
-    if (inMonth(t, month) && t.amount < 0) counts[t.merchant] = (counts[t.merchant] || 0) + 1;
+    if (inMonth(t, month) && t.amount < 0 && !isTransfer(t)) counts[t.merchant] = (counts[t.merchant] || 0) + 1;
   }
   const [topMerchant, visits] = Object.entries(counts).sort((a, b) => b[1] - a[1])[0] || [];
   if (visits >= 3) {
@@ -312,7 +319,7 @@ export function answerSpendingQuestion(question, transactions, month, categories
   //   3. The first word of a merchant name ("target" matches "Target T-1123")
   // Only this month's spending is searched. Returns { total, count, subject }.
   const q = question.toLowerCase();
-  const monthTx = transactions.filter((t) => inMonth(t, month) && t.amount < 0);
+  const monthTx = transactions.filter((t) => inMonth(t, month) && t.amount < 0 && !isTransfer(t));
 
   const cat = categories.find(
     (c) => q.includes(c.label.toLowerCase()) || q.includes(c.id) || (c.id === "dining" && /(restaurant|eating out|food)/.test(q))

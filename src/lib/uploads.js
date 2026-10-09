@@ -28,10 +28,12 @@ function friendlyUploadError(err) {
  * @param {File} file                 The CSV or PDF the user picked
  * @param {Object} [options]
  * @param {string} [options.accountId]  Which bank account this statement is for
+ * @param {string} [options.accountType]  "checking" or "credit"; the import uses it to read
+ *                                        card statements correctly
  * @param {(pct: number) => void} [options.onProgress]  Called with 0–100 as it uploads
  * @returns {Promise<string>} The Storage path of the uploaded file
  */
-export function uploadStatement(file, { accountId, onProgress } = {}) {
+export function uploadStatement(file, { accountId, accountType, onProgress } = {}) {
   const user = auth.currentUser;
   if (!user) {
     return Promise.reject(new Error("You need to be logged in to upload."));
@@ -45,7 +47,8 @@ export function uploadStatement(file, { accountId, onProgress } = {}) {
   const isPdf = file.name.toLowerCase().endsWith(".pdf");
   const metadata = {
     contentType: isPdf ? "application/pdf" : "text/csv",
-    customMetadata: { accountId: accountId || "" }, // the Cloud Function can read this later
+    // The Cloud Function reads these (onStatementUploaded in budgetly_backend_nodejs)
+    customMetadata: { accountId: accountId || "", accountType: accountType || "" },
   };
 
   const task = uploadBytesResumable(ref(storage, path), file, metadata);

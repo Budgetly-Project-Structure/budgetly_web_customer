@@ -407,9 +407,9 @@ export default function BudgetPage() {
 
   // Spending per category in the shown month, used for the "No budget yet" list
   const spent = spendingByCategory(transactions, month);
-  // Categories with no budget yet. Income and Uncategorized can't have a budget.
+  // Categories with no budget yet. Income, Transfer and Uncategorized can't have a budget.
   const unbudgeted = categories.filter(
-    (c) => c.id !== "income" && c.id !== "uncategorized" && !rows.some((r) => r.categoryId === c.id)
+    (c) => !["income", "transfers", "uncategorized"].includes(c.id) && !rows.some((r) => r.categoryId === c.id)
   );
 
   // Auto budget uses the same money in as the totals above.
