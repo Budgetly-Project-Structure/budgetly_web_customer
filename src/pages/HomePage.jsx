@@ -25,9 +25,17 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
-import { Card, CategoryIcon, EmptyState, StatusChip, buttonStyles } from "../components/ui";
+import { Card, CategoryIcon, EmptyState, MonthSwitcher, StatusChip, buttonStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
-import { BUDGET_STATUS, addMonths, budgetRows, generateInsights, monthTotals, needsReview } from "../lib/finance";
+import {
+  BUDGET_STATUS,
+  addMonths,
+  budgetRows,
+  generateInsights,
+  latestMonthWithData,
+  monthTotals,
+  needsReview,
+} from "../lib/finance";
 import { formatAmount, formatCurrency, formatDate, formatMonth } from "../lib/format";
 
 /**
@@ -91,12 +99,8 @@ export default function HomePage() {
     );
   }
 
-  // Newest month with transactions, but never later than the real current month
-  const latestMonth = transactions
-    .map((t) => t.date.slice(0, 7))
-    .filter((m) => m <= currentMonth)
-    .reduce((a, b) => (b > a ? b : a), "");
-  const month = pickedMonth ?? (latestMonth || currentMonth);
+  // Newest month with transactions (never later than today), unless the user picked one
+  const month = pickedMonth ?? (latestMonthWithData(transactions, currentMonth) || currentMonth);
   const previousMonth = addMonths(month, -1);
   const firstName = profile.displayName.trim().split(" ")[0];
   // Budgets are monthly limits, so this month's limits also apply to whichever month is shown
@@ -143,25 +147,7 @@ export default function HomePage() {
       <div>
         <div className="flex items-center gap-2 text-sm text-textMuted mb-1">
           <span>Hi {firstName || "there"} ·</span>
-          <button
-            type="button"
-            onClick={() => setPickedMonth(addMonths(month, -1))}
-            className="px-1.5 rounded hover:text-textLight"
-            aria-label="Previous month"
-          >
-            &lt;
-          </button>
-          <span className="text-textLight">{formatMonth(month)}</span>
-          {/* No "next" past the real current month */}
-          <button
-            type="button"
-            onClick={() => setPickedMonth(addMonths(month, 1))}
-            disabled={month >= currentMonth}
-            className="px-1.5 rounded hover:text-textLight disabled:opacity-30 disabled:hover:text-textMuted"
-            aria-label="Next month"
-          >
-            &gt;
-          </button>
+          <MonthSwitcher month={month} maxMonth={currentMonth} onChange={setPickedMonth} />
         </div>
         {/* Budget summary: three labeled numbers, then a progress bar with one plain sentence */}
         <div className="mt-3 bg-surface border border-line rounded-lg p-5">

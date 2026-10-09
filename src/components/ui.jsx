@@ -22,6 +22,8 @@
  * import { PageHeader, Card, StatusChip, EmptyState, buttonStyles } from "../components/UI";
  */
 import Icon from "./Icon";
+import { addMonths } from "../lib/finance";
+import { formatMonth } from "../lib/format";
 
 /**
  * Title row at the top of every page: a heading, an optional description,
@@ -49,6 +51,39 @@ export function PageHeader({ title, description, actions }) {
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
+  );
+}
+
+/**
+ * "< September 2026 >" arrows for stepping through months. "Next" is disabled
+ * at `maxMonth` so the user can't go past today.
+ *
+ * @param {string} month      Shown month, "YYYY-MM"
+ * @param {string} maxMonth   Latest month allowed (the real current month)
+ * @param {(month: string) => void} onChange
+ */
+export function MonthSwitcher({ month, maxMonth, onChange }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => onChange(addMonths(month, -1))}
+        className="px-1.5 rounded hover:text-textLight"
+        aria-label="Previous month"
+      >
+        &lt;
+      </button>
+      <span className="text-textLight">{formatMonth(month)}</span>
+      <button
+        type="button"
+        onClick={() => onChange(addMonths(month, 1))}
+        disabled={month >= maxMonth}
+        className="px-1.5 rounded hover:text-textLight disabled:opacity-30 disabled:hover:text-textMuted"
+        aria-label="Next month"
+      >
+        &gt;
+      </button>
+    </span>
   );
 }
 

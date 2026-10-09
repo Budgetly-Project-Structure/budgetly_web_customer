@@ -2,10 +2,14 @@
  * BudgetPage.jsx
  *
  * The "/budget" page: monthly spending limits per category.
+ *   - One month at a time, like the home page: it opens on the newest month with
+ *     transactions (never later than today), and arrows step through months.
+ *     Everything on the page uses that shown month.
  *   - Three totals at the top: the budget, spent so far, and left to spend (or over).
- *     The budget is the month's money in, like the home page. Before any money has
- *     come in this month, the most recent month's money in is used; with no money
- *     in at all, it falls back to the total of the category limits.
+ *     The budget is the shown month's money in; with no money in that month, it
+ *     falls back to the total of the category limits.
+ *   - Category limits are monthly amounts saved for the current month, so the same
+ *     limits are compared with whichever month is shown.
  *   - A row per budget with a progress bar and status ("On track" / "Near limit" / "Over budget")
  *   - Click the pencil to edit a limit inline, or remove the budget
  *   - "No budget yet" lists categories without a limit, with a "+ Set budget" button
@@ -22,10 +26,18 @@
  * for now (later: Firestore).
  */
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
-import { Card, CategoryIcon, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
+import { Card, CategoryIcon, MonthSwitcher, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
-import { BUDGET_STATUS, budgetRows, monthTotals, spendingByCategory, suggestBudgets } from "../lib/finance";
+import {
+  BUDGET_STATUS,
+  budgetRows,
+  latestMonthWithData,
+  monthTotals,
+  spendingByCategory,
+  suggestBudgets,
+} from "../lib/finance";
 import { formatCurrency, formatMonth } from "../lib/format";
 
 // Maps a budget status to the StatusChip color tone
@@ -104,7 +116,7 @@ function AutoBudgetPreview({
   onApply,
   onCancel,
 }) {
-  const { rows, total, months, income, fromIncome } = suggestion;
+  const { rows, total, months, income, fromIncome, uncategorized } = suggestion;
   const catById = (id) => categories.find((c) => c.id === id);
   const monthNames = months.map((m) => formatMonth(m).split(" ")[0]).join(", ");
   return (
@@ -113,6 +125,17 @@ function AutoBudgetPreview({
         {fromIncome
           ? `All of your money in is split across your categories, based on how you spent in ${monthNames}. Want to save some? Enter it below and it comes out of every category evenly.`
           : `No money in yet, so each category gets what you usually spend there (from ${monthNames}). Once a deposit shows up, Auto budget will use your money in instead.`}
+        {uncategorized > 0 && (
+          <>
+            {" "}
+            <span className="text-warn">
+              {formatCurrency(uncategorized)} of spending isn't categorized yet and wasn't included.
+            </span>{" "}
+            <Link to="/transactions" className="text-green hover:underline">
+              Set categories
+            </Link>
+          </>
+        )}
       </p>
 
       {fromIncome && (
@@ -350,32 +373,31 @@ export default function BudgetPage() {
   // Which editor is open: an existing budget's categoryId, "new:<categoryId>"
   // for a category in "No budget yet", or null when nothing is being edited
   const [editing, setEditing] = useState(null);
+  // Month picked with the arrows; null = not picked yet, so open on the newest month with data
+  const [pickedMonth, setPickedMonth] = useState(null);
+  const month = pickedMonth ?? (latestMonthWithData(transactions, currentMonth) || currentMonth);
+  const monthName = formatMonth(month).split(" ")[0];
   // Auto budget: whether the preview is open, what's typed in its savings field,
   // a note when there's nothing to go on, and the savings last applied (to label "unassigned")
   const [autoOpen, setAutoOpen] = useState(false);
   const [savingsInput, setSavingsInput] = useState("");
-  const [autoNote, setAutoNote] = useState("");
+  // { text, link? } shown instead of the preview when Auto budget can't run
+  const [autoNote, setAutoNote] = useState(null);
   const [appliedSavings, setAppliedSavings] = useState(0);
   const [addingCategory, setAddingCategory] = useState(false);
 
-  // Budgets for this month, most-used first so problems are at the top
-  const rows = budgetRows(budgets, transactions, currentMonth, categories).sort((a, b) => b.pct - a.pct);
+  // Limits are saved for the current month; like the home page, apply them to whichever month is shown
+  const monthBudgets = budgets.filter((b) => b.month === currentMonth).map((b) => ({ ...b, month }));
+  // Budgets for the shown month, most-used first so problems are at the top
+  const rows = budgetRows(monthBudgets, transactions, month, categories).sort((a, b) => b.pct - a.pct);
   // Totals for the summary cards
   const totalLimit = rows.reduce((s, r) => s + r.limit, 0);
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0);
   const overCount = rows.filter((r) => r.status === "over").length;
 
-  // The budget is the money that came in. Early in a month (before payday) there may be
-  // none yet, so use the newest earlier month that had money in.
-  const thisMonth = monthTotals(transactions, currentMonth);
-  const incomeMonth =
-    thisMonth.income > 0
-      ? currentMonth
-      : transactions
-          .filter((t) => t.amount > 0 && t.date.slice(0, 7) < currentMonth)
-          .map((t) => t.date.slice(0, 7))
-          .reduce((a, b) => (b > a ? b : a), "");
-  const income = incomeMonth ? monthTotals(transactions, incomeMonth).income : 0;
+  // The budget is the money that came in during the shown month
+  const thisMonth = monthTotals(transactions, month);
+  const income = thisMonth.income;
   const fromIncome = income > 0;
   // With money in, every dollar out counts; without it, only spending in budgeted categories (as before)
   const budgetTotal = fromIncome ? income : totalLimit;
@@ -383,8 +405,8 @@ export default function BudgetPage() {
   const leftToSpend = budgetTotal - spentTotal;
   const unassigned = income - totalLimit;
 
-  // Spending per category this month, used for the "No budget yet" list
-  const spent = spendingByCategory(transactions, currentMonth);
+  // Spending per category in the shown month, used for the "No budget yet" list
+  const spent = spendingByCategory(transactions, month);
   // Categories with no budget yet. Income and Uncategorized can't have a budget.
   const unbudgeted = categories.filter(
     (c) => c.id !== "income" && c.id !== "uncategorized" && !rows.some((r) => r.categoryId === c.id)
@@ -401,7 +423,7 @@ export default function BudgetPage() {
         ? `That's more than your money in (${formatCurrency(autoIncome)}).`
         : "";
   const suggestion = autoOpen
-    ? suggestBudgets(transactions, currentMonth, categories, autoIncome, savingsError ? 0 : savingsNum)
+    ? suggestBudgets(transactions, month, categories, autoIncome, savingsError ? 0 : savingsNum)
     : null;
   // Existing budgets for categories the suggestion doesn't cover (no recent spending)
   const removing = suggestion
@@ -410,13 +432,24 @@ export default function BudgetPage() {
 
   // Opens the Auto budget preview, or explains why it can't make one yet
   const openAutoBudget = () => {
-    if (suggestBudgets(transactions, currentMonth, categories, autoIncome).rows.length) {
+    const { rows: suggested, uncategorized } = suggestBudgets(transactions, month, categories, autoIncome);
+    if (suggested.length) {
       setAutoOpen(true);
       setSavingsInput("");
-      setAutoNote("");
+      setAutoNote(null);
+      return;
+    }
+    setAutoOpen(false);
+    if (transactions.length === 0) {
+      setAutoNote({ text: "Auto budget learns from your spending. Import a bank statement first, then try again." });
+    } else if (uncategorized > 0) {
+      // Imports arrive uncategorized until categories are set, so there's nothing to split yet
+      setAutoNote({
+        text: "Your transactions don't have categories yet, so Auto budget can't split them. Set categories on the Transactions page, or wait for auto-categorization.",
+        link: { to: "/transactions", label: "Go to Transactions" },
+      });
     } else {
-      setAutoOpen(false);
-      setAutoNote("Auto budget learns from your spending. Import a bank statement first, then try again.");
+      setAutoNote({ text: `There's no spending in ${monthName} for Auto budget to learn from. Try another month with the arrows.` });
     }
   };
 
@@ -434,16 +467,39 @@ export default function BudgetPage() {
     <div>
       <PageHeader
         title="Budget"
-        description={`Monthly limits for ${formatMonth(currentMonth)}.`}
+        description={`Monthly limits, showing ${formatMonth(month)}.`}
         actions={
-          <button type="button" onClick={openAutoBudget} className={buttonStyles.secondary}>
-            <Icon name="sparkle" className="w-4 h-4 text-green" /> Auto budget
-          </button>
+          <>
+            <span className="text-sm text-textMuted mr-2">
+              <MonthSwitcher
+                month={month}
+                maxMonth={currentMonth}
+                onChange={(m) => {
+                  setPickedMonth(m);
+                  setAutoOpen(false); // the preview was for the old month
+                  setAutoNote(null);
+                }}
+              />
+            </span>
+            <button type="button" onClick={openAutoBudget} className={buttonStyles.secondary}>
+              <Icon name="sparkle" className="w-4 h-4 text-green" /> Auto budget
+            </button>
+          </>
         }
       />
 
       {autoNote && (
-        <p className="mb-6 text-sm text-textMuted bg-surface border border-line rounded-lg px-4 py-3">{autoNote}</p>
+        <p className="mb-6 text-sm text-textMuted bg-surface border border-line rounded-lg px-4 py-3">
+          {autoNote.text}
+          {autoNote.link && (
+            <>
+              {" "}
+              <Link to={autoNote.link.to} className="text-green hover:underline">
+                {autoNote.link.label}
+              </Link>
+            </>
+          )}
+        </p>
       )}
       {suggestion && (
         <AutoBudgetPreview
@@ -463,11 +519,7 @@ export default function BudgetPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-surface border border-line rounded-lg p-4">
           <p className="text-xs text-textMuted mb-2">
-            {!fromIncome
-              ? "Budget (category limits)"
-              : incomeMonth === currentMonth
-                ? "Budget (money in)"
-                : `Budget (money in, ${formatMonth(incomeMonth).split(" ")[0]})`}
+            {fromIncome ? "Budget (money in)" : "Budget (category limits)"}
           </p>
           <p className="font-mono text-xl tabular-nums">{formatCurrency(budgetTotal)}</p>
         </div>
@@ -490,7 +542,7 @@ export default function BudgetPage() {
       {/* How the money in compares to the category limits below */}
       <p className="mt-3 mb-6 text-sm text-textMuted">
         {!fromIncome
-          ? "No money in yet, so the budget is your category limits added up. It switches to your money in once a deposit shows up."
+          ? `No money came in during ${monthName}, so the budget is your category limits added up. It switches to your money in once a deposit shows up.`
           : unassigned >= 0
             ? `${formatCurrency(totalLimit)} of ${formatCurrency(income)} assigned to categories, ${formatCurrency(unassigned)} unassigned${
                 unassigned > 0 && unassigned === appliedSavings ? " (savings)" : ""
@@ -555,7 +607,7 @@ export default function BudgetPage() {
                 <CategoryIcon category={c} size="sm" />
                 <div className="flex-1">
                   <p className="text-sm text-textLight">{c.label}</p>
-                  <p className="text-xs text-textMuted">{formatCurrency(spent[c.id] || 0)} spent this month</p>
+                  <p className="text-xs text-textMuted">{formatCurrency(spent[c.id] || 0)} spent in {monthName}</p>
                 </div>
                 {editing === `new:${c.id}` ? (
                   <LimitEditor
