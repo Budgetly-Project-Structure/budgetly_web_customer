@@ -28,7 +28,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
-import { Card, CategoryIcon, MonthSwitcher, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
+import { Card, CategoryIcon, EmptyState, MonthSwitcher, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
 import {
   BUDGET_STATUS,
@@ -552,6 +552,19 @@ export default function BudgetPage() {
 
       {/* Budgeted categories, highest % used first */}
       <Card title="Categories" padded={false}>
+        {/* No budgets yet (SCRUM-87): say what to do next instead of showing an empty list */}
+        {rows.length === 0 && (
+          <EmptyState
+            icon="budget"
+            title="No budgets set yet"
+            body={'Pick a category under "No budget yet" below and choose + Set budget, or let Auto budget suggest limits from your spending.'}
+            action={
+              <button type="button" onClick={openAutoBudget} className={buttonStyles.primary}>
+                Try Auto budget
+              </button>
+            }
+          />
+        )}
         <ul className="divide-y divide-line border-t border-line">
           {rows.map((row) => (
             <BudgetRow

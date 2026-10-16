@@ -228,6 +228,19 @@ export default function HomePage() {
             </Link>
           }
         >
+          {/* No budgets yet (SCRUM-87): point to the Budget page instead of showing an empty card */}
+          {watchList.length === 0 ? (
+            <EmptyState
+              icon="budget"
+              title="No budgets yet"
+              body="Set a monthly limit for a category, or let Auto budget suggest limits from your spending."
+              action={
+                <Link to="/budget" className={buttonStyles.primary}>
+                  Set a budget
+                </Link>
+              }
+            />
+          ) : (
           <ul className="space-y-4">
             {watchList.map((r) => {
               // s = label, icon and colors for this budget's status ("over" / "near" / "ok")
@@ -261,6 +274,7 @@ export default function HomePage() {
               );
             })}
           </ul>
+          )}
         </Card>
 
         {/* Insight callout */}
