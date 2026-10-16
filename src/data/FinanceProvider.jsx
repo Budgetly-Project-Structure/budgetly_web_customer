@@ -10,21 +10,22 @@
  *   Actions: updateTransactionCategory, setBudgetLimit, removeBudget, addCategory,
  *            addStatement, updateStatement, removeStatement, deleteStatement, setProfile
  *
- * Transactions and import history are live from Firestore (onSnapshot).
- * Budgets and profile still start as mock data and live in React state, so
- * changes to those are lost on refresh. Categories the user makes are kept in
+ * Transactions, import history and budgets are live from Firestore (onSnapshot).
+ * Budgets are users/{uid}/budgets/{categoryId} = { categoryId, limit, updatedAt }.
+ * A limit is monthly, so it applies to every month; a new user has none.
+ * The profile still starts as mock data and lives in React state, so
+ * changes to it are lost on refresh. Categories the user makes are kept in
  * this browser (localStorage) until they move to Firestore too. The plan is to swap them for Firestore
  * here too; the pages won't need to change.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, doc, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
+import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../lib/firebase";
 import { FinanceContext } from "./FinanceContext";
 import {
   ACCOUNTS,
-  BUDGETS,
   CATEGORIES,
   CURRENT_MONTH,
   PREVIOUS_MONTH,
@@ -105,15 +106,15 @@ function loadDismissed(uid) {
 }
 
 /**
- * Transactions and imports come from Firestore; budgets and profile are still in
- * memory (their updaters have a TODO showing the Firestore call they will become).
+ * Transactions, imports and budgets come from Firestore; the profile is still in
+ * memory.
  * Page components only talk to this provider, so swapping the data source later
  * won't touch the pages.
  */
 export default function FinanceProvider({ children }) {
   const [serverTransactions, setServerTransactions] = useState(null); // null = still loading
   const [transactionsError, setTransactionsError] = useState(null);
-  const [budgets, setBudgets] = useState(BUDGETS);
+  const [serverBudgets, setServerBudgets] = useState(null); // null = still loading
   // Import history = uploads this browser is sending right now (pendingUploads)
   // + the server's import docs (serverImports, live from Firestore).
   const [pendingUploads, setPendingUploads] = useState([]);
@@ -125,26 +126,62 @@ export default function FinanceProvider({ children }) {
   const [customCategories, setCustomCategories] = useState([]);
 
   /**
-   * Sets this month's limit for a category: updates the budget if it exists,
-   * otherwise creates a new one.
+   * Sets the monthly limit for a category: creates the budget or changes it.
+   * The live listener below puts it on screen right away.
    */
-  const setBudgetLimit = useCallback((categoryId, limit) => {
-    // TODO: setDoc(doc(db, "budgets", `${uid}_${categoryId}_${CURRENT_MONTH}`), { ... }, { merge: true })
-    setBudgets((prev) => {
-      const exists = prev.some((b) => b.categoryId === categoryId && b.month === CURRENT_MONTH);
-      if (exists) {
-        return prev.map((b) => (b.categoryId === categoryId && b.month === CURRENT_MONTH ? { ...b, limit } : b));
+  const setBudgetLimit = useCallback(
+    async (categoryId, limit) => {
+      if (!uid) return;
+      try {
+        await setDoc(doc(db, "users", uid, "budgets", categoryId), { categoryId, limit, updatedAt: serverTimestamp() });
+      } catch (err) {
+        console.error("Could not save budget:", err.code, err.message);
       }
-      return [
-        ...prev,
-        { id: `bud-${categoryId}-${CURRENT_MONTH}`, userId: "demo-user", categoryId, month: CURRENT_MONTH, limit },
-      ];
-    });
-  }, []);
+    },
+    [uid]
+  );
 
-  const removeBudget = useCallback((categoryId) => {
-    setBudgets((prev) => prev.filter((b) => !(b.categoryId === categoryId && b.month === CURRENT_MONTH)));
-  }, []);
+  const removeBudget = useCallback(
+    async (categoryId) => {
+      if (!uid) return;
+      try {
+        await deleteDoc(doc(db, "users", uid, "budgets", categoryId));
+      } catch (err) {
+        console.error("Could not remove budget:", err.code, err.message);
+      }
+    },
+    [uid]
+  );
+
+  // Live budgets from Firestore, in the shape the pages use. Limits are monthly,
+  // so every budget is stamped with the current month.
+  useEffect(() => {
+    if (!uid) {
+      setServerBudgets(null);
+      return undefined;
+    }
+    setServerBudgets(null);
+    return onSnapshot(
+      collection(db, "users", uid, "budgets"),
+      (snap) =>
+        setServerBudgets(
+          snap.docs.map((d) => ({
+            id: d.id,
+            userId: uid,
+            categoryId: d.data().categoryId ?? d.id,
+            month: CURRENT_MONTH,
+            limit: Number(d.data().limit) || 0,
+          }))
+        ),
+      (err) => {
+        console.error("Could not load budgets:", err.code, err.message);
+        setServerBudgets([]);
+      }
+    );
+  }, [uid]);
+
+  const budgets = useMemo(() => serverBudgets ?? [], [serverBudgets]);
+  const budgetsLoading = Boolean(uid) && serverBudgets === null;
 
   // Built-in categories, then the user's own. A transaction can point at a custom
   // category this browser doesn't know (made on another device), so those get a
@@ -341,6 +378,7 @@ export default function FinanceProvider({ children }) {
       transactionsLoading,
       transactionsError,
       budgets,
+      budgetsLoading,
       statements,
       statementsLoading,
       statementsError,
@@ -362,6 +400,7 @@ export default function FinanceProvider({ children }) {
       transactionsLoading,
       transactionsError,
       budgets,
+      budgetsLoading,
       statements,
       statementsLoading,
       statementsError,

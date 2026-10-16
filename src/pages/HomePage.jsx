@@ -16,7 +16,7 @@
  * so someone whose last statement ended last month doesn't land on an empty page.
  *
  * Data: everything comes from useFinance() (FinanceProvider). Transactions are
- * live from Firestore; budgets are still mock data.
+ * live from Firestore, and so are budgets.
  * All the math lives in lib/finance.js so this file only handles display.
  *
  * New user with no transactions → shows an empty state pointing to /import
@@ -60,15 +60,16 @@ function SummaryTile({ label, value, sub, subTone = "muted" }) {
 
 /** Dashboard page component. */
 export default function HomePage() {
-  const { transactions, transactionsLoading, transactionsError, budgets, categories, currentMonth, profile } = useFinance();
+  const { transactions, transactionsLoading, transactionsError, budgets, budgetsLoading, categories, currentMonth, profile } =
+    useFinance();
   // Month picked with the arrows; null = not picked yet, so use the default below
   const [pickedMonth, setPickedMonth] = useState(null);
 
   // Waiting for the first snapshot from Firestore: don't flash "no data yet"
-  if (transactionsLoading) {
+  if (transactionsLoading || budgetsLoading) {
     return (
       <p className="py-16 text-center text-sm text-textMuted" role="status">
-        Loading your transactions…
+        Loading your data…
       </p>
     );
   }
