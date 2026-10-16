@@ -16,6 +16,8 @@
  * @param {(values: {date: string, merchant: string, amount: number, category: string, accountId: string|null}) => Promise<void>} props.onSave
  *        Saves it. Should throw an Error with a readable message if it fails.
  * @param {() => void} props.onCancel  Closes the form without saving
+ * @param {boolean}  [props.inline]    True when the form opens inside the list, in place of the row
+ *                                     being edited: drawn as a plain panel instead of a Card
  */
 import { useState } from "react";
 import { Card, buttonStyles, inputStyles } from "./ui";
@@ -26,7 +28,7 @@ function today() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export default function ManualTransactionForm({ initial, categories, accounts, onSave, onCancel }) {
+export default function ManualTransactionForm({ initial, categories, accounts, onSave, onCancel, inline = false }) {
   const editing = Boolean(initial);
   const [date, setDate] = useState(initial?.date ?? today());
   const [merchant, setMerchant] = useState(initial?.merchant ?? "");
@@ -60,8 +62,11 @@ export default function ManualTransactionForm({ initial, categories, accounts, o
     }
   };
 
-  return (
-    <Card title={editing ? "Edit transaction" : "Add a transaction"} className="mb-4">
+  const title = editing ? "Edit transaction" : "Add a transaction";
+
+  // Not a nested component: one defined inside this function would be a new type on
+  // every render, which would remount the inputs and drop focus on each keystroke.
+  const body = (
       <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <label className="text-xs text-textMuted">
           Date
@@ -136,6 +141,16 @@ export default function ManualTransactionForm({ initial, categories, accounts, o
           </p>
         )}
       </form>
+  );
+
+  return inline ? (
+    <div className="bg-raised/40 border border-line rounded-md p-4">
+      <h3 className="text-sm font-medium text-textLight mb-3">{title}</h3>
+      {body}
+    </div>
+  ) : (
+    <Card title={title} className="mb-4">
+      {body}
     </Card>
   );
 }

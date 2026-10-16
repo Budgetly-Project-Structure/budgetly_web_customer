@@ -196,7 +196,9 @@ export default function TransactionsPage() {
     setAdding(false);
     setEditing(null);
   };
-  const showForm = adding || editing;
+  // "Add" opens the form at the top (that's where its button is). "Edit" opens it right
+  // on the row being edited, so it's never out of sight on a long list.
+  const showForm = adding;
   const addButton = (
     <button
       onClick={() => {
@@ -209,8 +211,13 @@ export default function TransactionsPage() {
     </button>
   );
   const form = showForm && (
+    <ManualTransactionForm key="new" categories={categories} accounts={accounts} onSave={saveManual} onCancel={closeForm} />
+  );
+  // The same form, in place of the row being edited
+  const editForm = editing && (
     <ManualTransactionForm
-      key={editing ? editing.id : "new"}
+      key={editing.id}
+      inline
       initial={editing}
       categories={categories}
       accounts={accounts}
@@ -388,6 +395,15 @@ export default function TransactionsPage() {
                 <tbody className="divide-y divide-line">
                   {filtered.map((t) => {
                     const acct = acctById(t.accountId);
+                    if (editing?.id === t.id) {
+                      return (
+                        <tr key={t.id}>
+                          <td colSpan={6} className="px-4 py-3">
+                            {editForm}
+                          </td>
+                        </tr>
+                      );
+                    }
                     return (
                       <tr key={t.id} className="hover:bg-raised/60">
                         <td className="px-4 py-2.5 text-textMuted whitespace-nowrap">{formatDate(t.date)}</td>
@@ -423,7 +439,12 @@ export default function TransactionsPage() {
 
             {/* Mobile card list */}
             <ul className="md:hidden divide-y divide-line">
-              {filtered.map((t) => (
+              {filtered.map((t) =>
+                editing?.id === t.id ? (
+                  <li key={t.id} className="p-4">
+                    {editForm}
+                  </li>
+                ) : (
                 <li key={t.id} className="p-4">
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="min-w-0">
@@ -439,7 +460,8 @@ export default function TransactionsPage() {
                   <CategorySelect txn={t} categories={categories} onChange={updateTransactionCategory} />
                   <ManualActions txn={t} />
                 </li>
-              ))}
+                )
+              )}
             </ul>
           </>
         )}
