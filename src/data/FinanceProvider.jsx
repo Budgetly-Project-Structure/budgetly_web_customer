@@ -7,7 +7,7 @@
  * What it provides:
  *   Data:    categories, accounts, currentMonth, previousMonth,
  *            transactions, budgets, statements (import history), profile, lastImport
- *   Actions: updateTransactionCategory, setBudgetLimit, removeBudget, addCategory,
+ *   Actions: updateTransactionCategory, addTransaction, updateTransaction, deleteTransaction, setBudgetLimit, removeBudget, addCategory,
  *            addStatement, updateStatement, removeStatement, deleteStatement, setProfile
  *
  * Transactions, import history and budgets are live from Firestore (onSnapshot).
@@ -20,7 +20,19 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, deleteDoc, doc, onSnapshot, orderBy, query, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import {
+  Timestamp,
+  addDoc,
+  collection,
+  deleteDoc,
+  doc,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../lib/firebase";
 import { FinanceContext } from "./FinanceContext";
@@ -78,8 +90,12 @@ function transactionFromDoc(d) {
     isUserCorrected: corrected,
     accountId: x.accountId ?? null,
     sourceStatementId: x.sourceStatementId ?? null,
+    source: x.source ?? "import", // "manual" = added by the user on the Transactions page (SCRUM-86)
   };
 }
+
+// Shown on the manual transaction form when a save fails
+const SAVE_ERROR = "We couldn't save this transaction. Please try again.";
 
 // Failed imports can't be deleted by the browser (Firestore rules make imports
 // read-only), so "Dismiss" just hides them. We remember that per user, per device.
@@ -282,6 +298,73 @@ export default function FinanceProvider({ children }) {
     [uid]
   );
 
+  // Manual transactions (SCRUM-86): the user's own entries, marked source "manual". The
+  // Firestore rules only let the browser create/edit/delete these, never imported ones.
+  // Each throws an Error with a message that can be shown on the form.
+  /** Adds a transaction typed in by the user. `date` is "YYYY-MM-DD"; amount < 0 = spending. */
+  const addTransaction = useCallback(
+    async ({ date, merchant, amount, category, accountId }) => {
+      if (!uid) throw new Error("You need to be logged in.");
+      try {
+        await addDoc(collection(db, "users", uid, "transactions"), {
+          userId: uid,
+          // Noon UTC, same as imported transactions, so the day never shifts with time zones
+          date: Timestamp.fromDate(new Date(`${date}T12:00:00Z`)),
+          merchant,
+          amount,
+          category,
+          categorySource: "user",
+          categoryConfidence: 1,
+          isUserCorrected: true,
+          accountId: accountId ?? null,
+          sourceStatementId: null,
+          source: "manual",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.error("Could not add transaction:", err.code, err.message);
+        throw new Error(SAVE_ERROR);
+      }
+    },
+    [uid]
+  );
+
+  /** Changes a manual transaction. Same fields as addTransaction. */
+  const updateTransaction = useCallback(
+    async (id, { date, merchant, amount, category, accountId }) => {
+      if (!uid) throw new Error("You need to be logged in.");
+      try {
+        await updateDoc(doc(db, "users", uid, "transactions", id), {
+          date: Timestamp.fromDate(new Date(`${date}T12:00:00Z`)),
+          merchant,
+          amount,
+          category,
+          accountId: accountId ?? null,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.error("Could not update transaction:", err.code, err.message);
+        throw new Error(SAVE_ERROR);
+      }
+    },
+    [uid]
+  );
+
+  /** Deletes a manual transaction. */
+  const deleteTransaction = useCallback(
+    async (id) => {
+      if (!uid) return;
+      try {
+        await deleteDoc(doc(db, "users", uid, "transactions", id));
+      } catch (err) {
+        console.error("Could not delete transaction:", err.code, err.message);
+        throw new Error("We couldn't delete this transaction. Please try again.");
+      }
+    },
+    [uid]
+  );
+
   // Live import history. onSnapshot fires on every change, so when the Cloud
   // Function moves an import from "uploaded" to "processing" to "completed",
   // the Import page updates by itself.
@@ -385,6 +468,9 @@ export default function FinanceProvider({ children }) {
       profile,
       lastImport,
       updateTransactionCategory,
+      addTransaction,
+      updateTransaction,
+      deleteTransaction,
       setBudgetLimit,
       removeBudget,
       addCategory,
@@ -407,6 +493,9 @@ export default function FinanceProvider({ children }) {
       profile,
       lastImport,
       updateTransactionCategory,
+      addTransaction,
+      updateTransaction,
+      deleteTransaction,
       setBudgetLimit,
       removeBudget,
       addCategory,
