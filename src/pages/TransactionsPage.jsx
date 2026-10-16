@@ -13,12 +13,17 @@
  * The "review" filter is stored in the URL (?review=1) so the Home page's
  * "Review now" button can link straight to the filtered list.
  *
+ * Manual transactions (SCRUM-86): "Add transaction" opens a form to enter one by hand
+ * (saved with source "manual"). Those rows get Edit and Delete buttons; imported
+ * rows only get the category dropdown, since the statement is their source of truth.
+ *
  * Data: useFinance(). Changing a category calls updateTransactionCategory(),
- * which marks the transaction isUserCorrected (later: a Firestore update).
+ * which marks the transaction isUserCorrected (a Firestore update).
  */
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Icon from "../components/Icon";
+import ManualTransactionForm from "../components/ManualTransactionForm";
 import { Card, CategoryIcon, EmptyState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
 import { needsReview } from "../lib/finance";
@@ -90,8 +95,19 @@ function SortHeader({ label, field, sort, setSort, align = "left" }) {
 
 /** Transactions page component. */
 export default function TransactionsPage() {
-  const { transactions, transactionsLoading, transactionsError, categories, accounts, currentMonth, previousMonth, updateTransactionCategory } =
-    useFinance();
+  const {
+    transactions,
+    transactionsLoading,
+    transactionsError,
+    categories,
+    accounts,
+    currentMonth,
+    previousMonth,
+    updateTransactionCategory,
+    addTransaction,
+    updateTransaction,
+    deleteTransaction,
+  } = useFinance();
   const [params, setParams] = useSearchParams();
 
   // Filter and sort state. Month defaults to the current month; newest first.
@@ -100,6 +116,12 @@ export default function TransactionsPage() {
   const [category, setCategory] = useState("all");
   const [type, setType] = useState("all");
   const [sort, setSort] = useState({ field: "date", dir: "desc" });
+  // Manual transactions: the form is open to add (adding) or to edit one (editing = that
+  // transaction); confirmDeleteId is the row showing "Delete? Yes / No"
+  const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [rowError, setRowError] = useState(null);
   // "Needs review" lives in the URL instead of state (see header comment)
   const reviewOnly = params.get("review") === "1";
 
@@ -150,12 +172,60 @@ export default function TransactionsPage() {
     setReviewOnly(false);
   };
 
+  // Saves the form. After saving, show all months so the new or moved transaction
+  // can't end up hidden by the month filter.
+  const saveManual = async (values) => {
+    if (editing) await updateTransaction(editing.id, values);
+    else await addTransaction(values);
+    setMonth("all");
+    setAdding(false);
+    setEditing(null);
+  };
+
+  const removeManual = async (id) => {
+    setRowError(null);
+    try {
+      await deleteTransaction(id);
+    } catch (err) {
+      setRowError(err.message);
+    }
+    setConfirmDeleteId(null);
+  };
+
+  const closeForm = () => {
+    setAdding(false);
+    setEditing(null);
+  };
+  const showForm = adding || editing;
+  const addButton = (
+    <button
+      onClick={() => {
+        setEditing(null);
+        setAdding(true);
+      }}
+      className={buttonStyles.secondary}
+    >
+      + Add transaction
+    </button>
+  );
+  const form = showForm && (
+    <ManualTransactionForm
+      key={editing ? editing.id : "new"}
+      initial={editing}
+      categories={categories}
+      accounts={accounts}
+      onSave={saveManual}
+      onCancel={closeForm}
+    />
+  );
+
   // Loading / error / "no data yet" come before the filters: with nothing imported,
   // search and filters have nothing to work on. (All hooks above run on every render.)
   if (transactionsLoading || transactionsError || transactions.length === 0) {
     return (
       <div>
         <PageHeader title="Transactions" description="Everything from your imported statements." />
+        {!transactionsLoading && !transactionsError && form}
         <Card>
           {transactionsLoading ? (
             <p className="py-12 text-center text-sm text-textMuted" role="status">
@@ -169,9 +239,12 @@ export default function TransactionsPage() {
               title="No transactions yet"
               body="Import a CSV or PDF bank statement and your transactions will show up here."
               action={
-                <Link to="/import" className={buttonStyles.primary}>
-                  Import a statement
-                </Link>
+                <div className="flex flex-wrap justify-center gap-3">
+                  <Link to="/import" className={buttonStyles.primary}>
+                    Import a statement
+                  </Link>
+                  {addButton}
+                </div>
               }
             />
           )}
@@ -180,12 +253,55 @@ export default function TransactionsPage() {
     );
   }
 
+  /** Edit / Delete for a manual transaction (nothing for imported ones). Delete asks first. */
+  const ManualActions = ({ txn }) => {
+    if (txn.source !== "manual") return null;
+    if (confirmDeleteId === txn.id) {
+      return (
+        <span className="inline-flex items-center gap-2 text-xs mt-2 md:mt-0">
+          <span className="text-textMuted">Delete this?</span>
+          <button onClick={() => removeManual(txn.id)} className="text-danger hover:underline">
+            Yes, delete
+          </button>
+          <button onClick={() => setConfirmDeleteId(null)} className="text-textMuted hover:text-textLight">
+            Cancel
+          </button>
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-3 text-xs mt-2 md:mt-0">
+        <button
+          onClick={() => {
+            setAdding(false);
+            setEditing(txn);
+          }}
+          aria-label={`Edit ${txn.merchant}`}
+          className="text-textMuted hover:text-textLight"
+        >
+          Edit
+        </button>
+        <button onClick={() => setConfirmDeleteId(txn.id)} aria-label={`Delete ${txn.merchant}`} className="text-textMuted hover:text-danger">
+          Delete
+        </button>
+      </span>
+    );
+  };
+
   return (
     <div>
       <PageHeader
         title="Transactions"
-        description="Everything from your imported statements. Change a category and it's remembered."
+        description="Everything from your imported statements, plus any you add yourself. Change a category and it's remembered."
+        actions={addButton}
       />
+
+      {form}
+      {rowError && (
+        <p role="alert" className="text-sm text-danger mb-3">
+          {rowError}
+        </p>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col lg:flex-row gap-3 mb-4">
@@ -264,6 +380,9 @@ export default function TransactionsPage() {
                     <th scope="col" className="px-4 py-3 font-medium text-left">Category</th>
                     <th scope="col" className="px-4 py-3 font-medium text-left">Account</th>
                     <SortHeader label="Amount" field="amount" sort={sort} setSort={setSort} align="right" />
+                    <th scope="col" className="px-4 py-3 font-medium text-right">
+                      <span className="sr-only">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -276,6 +395,7 @@ export default function TransactionsPage() {
                           <div className="flex items-center gap-3">
                             <CategoryIcon category={catById(t.category)} size="sm" />
                             <span className="text-textLight">{t.merchant}</span>
+                            {t.source === "manual" && <span className="text-xs text-textMuted border border-line rounded px-1">Manual</span>}
                           </div>
                         </td>
                         <td className="px-4 py-2.5">
@@ -290,6 +410,9 @@ export default function TransactionsPage() {
                           }`}
                         >
                           {formatAmount(t.amount)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                          <ManualActions txn={t} />
                         </td>
                       </tr>
                     );
@@ -314,6 +437,7 @@ export default function TransactionsPage() {
                     </span>
                   </div>
                   <CategorySelect txn={t} categories={categories} onChange={updateTransactionCategory} />
+                  <ManualActions txn={t} />
                 </li>
               ))}
             </ul>
