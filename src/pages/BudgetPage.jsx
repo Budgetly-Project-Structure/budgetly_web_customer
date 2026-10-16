@@ -22,7 +22,7 @@
  * Status thresholds come from lib/finance.js (85% = near, over 100% = over).
  * Status is shown with an icon and a label, not just color (ui-constraints.md).
  *
- * Data: useFinance(). setBudgetLimit / removeBudget / addCategory update local state
+ * Data: useFinance(). setBudgetLimit / removeBudget save to Firestore; addCategory updates local state
  * for now (later: Firestore).
  */
 import { useState } from "react";
@@ -368,7 +368,7 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
  * that don't have a budget yet. Only one limit can be edited at a time.
  */
 export default function BudgetPage() {
-  const { budgets, transactions, categories, currentMonth, profile, setBudgetLimit, removeBudget, addCategory } =
+  const { budgets, budgetsLoading, transactionsLoading, transactions, categories, currentMonth, profile, setBudgetLimit, removeBudget, addCategory } =
     useFinance();
   // Which editor is open: an existing budget's categoryId, "new:<categoryId>"
   // for a category in "No budget yet", or null when nothing is being edited
@@ -462,6 +462,15 @@ export default function BudgetPage() {
     setAutoOpen(false);
     setEditing(null);
   };
+
+  // Wait for Firestore, so a user with budgets doesn't see "No budgets set yet" for a moment
+  if (budgetsLoading || transactionsLoading) {
+    return (
+      <p className="py-16 text-center text-sm text-textMuted" role="status">
+        Loading your budgets…
+      </p>
+    );
+  }
 
   return (
     <div>
