@@ -28,7 +28,7 @@ import Icon from "../components/Icon";
 import ManualTransactionForm from "../components/ManualTransactionForm";
 import { Card, CategoryIcon, EmptyState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
-import { needsReview } from "../lib/finance";
+import { isTransfer, needsReview } from "../lib/finance";
 import { formatAmount, formatDate, formatMonth, maskAccount } from "../lib/format";
 
 /**
@@ -220,8 +220,12 @@ export default function TransactionsPage() {
     });
   }, [transactions, query, month, category, type, reviewOnly, sort]);
 
-  // Sum of what's on screen (shown as "net" above the table)
-  const net = filtered.reduce((s, t) => s + t.amount, 0);
+  // Sum of what's on screen (shown as "net" above the table). Transfers (card payments,
+  // moving money between your own accounts) are left out, the same as on the dashboard,
+  // unless you're looking at the Transfer category on purpose.
+  const skipTransfers = category !== "transfers";
+  const net = filtered.reduce((s, t) => (skipTransfers && isTransfer(t) ? s : s + t.amount), 0);
+  const transfersLeftOut = skipTransfers && filtered.some(isTransfer);
   // Count for the "Needs review (N)" button, for the selected month regardless of other filters
   const reviewTotal = transactions.filter((t) => (month === "all" || t.date.startsWith(month)) && needsReview(t)).length;
   const hasFilters = query || category !== "all" || type !== "all" || reviewOnly;
@@ -419,6 +423,7 @@ export default function TransactionsPage() {
         <p className="text-sm text-textMuted">
           {filtered.length} transaction{filtered.length === 1 ? "" : "s"} · net{" "}
           <span className={`font-mono tabular-nums ${net >= 0 ? "text-green" : "text-textLight"}`}>{formatAmount(net)}</span>
+          {transfersLeftOut && <span> (transfers not counted)</span>}
         </p>
       </div>
 
