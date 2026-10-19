@@ -143,8 +143,9 @@ export default function HomePage() {
   // Only the first (most important) insight is shown here; /insights shows all of them
   const insight = generateInsights(transactions, month, previousMonth, categories, monthBudgets)[0];
   const catById = (id) => categories.find((c) => c.id === id);
-  // % change in spending vs last month (0 if last month had no spending, to avoid dividing by 0)
-  const spendChange = prevTotals.spending ? ((totals.spending - prevTotals.spending) / prevTotals.spending) * 100 : 0;
+  // % change in spending vs last month; null when last month has no spending to compare with
+  const spendChange = prevTotals.spending ? ((totals.spending - prevTotals.spending) / prevTotals.spending) * 100 : null;
+  const prevMonthName = formatMonth(previousMonth).split(" ")[0];
 
   return (
     <div className="space-y-8">
@@ -202,8 +203,12 @@ export default function HomePage() {
         <SummaryTile
           label="Money out"
           value={formatCurrency(totals.spending)}
-          sub={`${spendChange >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(spendChange))}% vs ${formatMonth(previousMonth).split(" ")[0]}`}
-          subTone={spendChange > 0 ? "warn" : "good"}
+          sub={
+            spendChange === null
+              ? `No ${prevMonthName} data to compare`
+              : `${spendChange >= 0 ? "↑" : "↓"} ${Math.abs(Math.round(spendChange))}% vs ${prevMonthName}`
+          }
+          subTone={spendChange === null ? "muted" : spendChange > 0 ? "warn" : "good"}
         />
         <SummaryTile
           label="Left over"
