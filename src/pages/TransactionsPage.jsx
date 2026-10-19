@@ -17,8 +17,10 @@
  * (saved with source "manual"). Those rows get Edit and Delete buttons; imported
  * rows only get the category dropdown, since the statement is their source of truth.
  *
- * Data: useFinance(). Changing a category calls updateTransactionCategory(),
- * which marks the transaction isUserCorrected (a Firestore update).
+ * Inline category edit (SCRUM-77): picking a category saves it right away
+ * (updateTransactionCategory, a Firestore update that marks it isUserCorrected),
+ * shows "Saving…" and a message if it fails, and then offers to give the other
+ * transactions from the same merchant the same category in one click.
  */
 import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -29,23 +31,51 @@ import { useFinance } from "../data/FinanceContext";
 import { needsReview } from "../lib/finance";
 import { formatAmount, formatDate, formatMonth, maskAccount } from "../lib/format";
 
-/** Inline category picker — correcting a category is one click + one choice (ui-constraints.md). */
 /**
- * The category dropdown shown on each transaction.
- * Adds a "Review" chip if the category is low-confidence, and "Edited" if
- * the user already changed it.
+ * The category dropdown shown on each transaction. Correcting a category is one
+ * click + one choice (ui-constraints.md). Adds a "Review" chip if the category is
+ * low-confidence, and "Edited" if the user already changed it.
+ *
+ * After a change it offers "Also set N more": the other transactions from the
+ * same merchant that the user hasn't set themselves and that aren't in that
+ * category yet.
  *
  * @param {Object}   txn         The transaction
  * @param {Object[]} categories  All categories (for the options)
- * @param {(id: string, category: string) => void} onChange
+ * @param {(id: string, category: string) => Promise<void>} onChange  Saves one; throws on failure
+ * @param {(txn: Object) => Object[]} sameMerchant  Other transactions with this merchant
  */
-function CategorySelect({ txn, categories, onChange }) {
+function CategorySelect({ txn, categories, onChange, sameMerchant }) {
   const flagged = needsReview(txn);
+  // null, "saving", an error message, or { category, others } to offer the same change
+  const [status, setStatus] = useState(null);
+
+  async function change(category) {
+    setStatus("saving");
+    try {
+      await onChange(txn.id, category);
+      const others = sameMerchant(txn).filter((o) => !o.isUserCorrected && o.category !== category);
+      setStatus(others.length ? { category, others } : null);
+    } catch (err) {
+      setStatus(err.message);
+    }
+  }
+
+  async function applyToOthers() {
+    const { category, others } = status;
+    setStatus("saving");
+    // Each one is its own small update, so one failure doesn't stop the rest
+    const results = await Promise.allSettled(others.map((o) => onChange(o.id, category)));
+    const failed = results.filter((r) => r.status === "rejected").length;
+    setStatus(failed ? `${failed} of ${others.length} couldn't be saved. Try again.` : null);
+  }
+
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <select
         value={txn.category}
-        onChange={(e) => onChange(txn.id, e.target.value)}
+        onChange={(e) => change(e.target.value)}
+        disabled={status === "saving"}
         aria-label={`Category for ${txn.merchant}`}
         className={`bg-charcoal border rounded-md pl-2 pr-7 py-1 text-sm text-textLight focus:outline-none focus:border-green cursor-pointer ${
           flagged ? "border-warn/60" : "border-line hover:border-textMuted"
@@ -62,9 +92,29 @@ function CategorySelect({ txn, categories, onChange }) {
           Review
         </StatusChip>
       )}
-      {txn.isUserCorrected && (
+      {txn.isUserCorrected && status === null && (
         <span className="text-xs text-textMuted" title="You set this category">
           Edited
+        </span>
+      )}
+      {status === "saving" && (
+        <span className="text-xs text-textMuted" role="status">
+          Saving…
+        </span>
+      )}
+      {typeof status === "string" && status !== "saving" && (
+        <span className="text-xs text-danger" role="alert">
+          {status}
+        </span>
+      )}
+      {status?.others && (
+        <span className="flex items-center gap-2 text-xs">
+          <button type="button" onClick={applyToOthers} className="text-green hover:underline">
+            Also set {status.others.length} more from this merchant
+          </button>
+          <button type="button" onClick={() => setStatus(null)} className="text-textMuted hover:text-textLight" aria-label="No thanks">
+            ✕
+          </button>
         </span>
       )}
     </div>
@@ -109,6 +159,17 @@ export default function TransactionsPage() {
     deleteTransaction,
   } = useFinance();
   const [params, setParams] = useSearchParams();
+
+  // Transactions grouped by merchant text, for "Also set N more from this merchant"
+  const byMerchant = useMemo(() => {
+    const map = new Map();
+    for (const t of transactions) {
+      if (!map.has(t.merchant)) map.set(t.merchant, []);
+      map.get(t.merchant).push(t);
+    }
+    return map;
+  }, [transactions]);
+  const sameMerchant = (txn) => (byMerchant.get(txn.merchant) ?? []).filter((o) => o.id !== txn.id);
 
   // Filter and sort state. Month defaults to the current month; newest first.
   const [query, setQuery] = useState("");
@@ -415,7 +476,7 @@ export default function TransactionsPage() {
                           </div>
                         </td>
                         <td className="px-4 py-2.5">
-                          <CategorySelect txn={t} categories={categories} onChange={updateTransactionCategory} />
+                          <CategorySelect txn={t} categories={categories} onChange={updateTransactionCategory} sameMerchant={sameMerchant} />
                         </td>
                         <td className="px-4 py-2.5 text-textMuted whitespace-nowrap">
                           {acct?.name} <span className="font-mono text-xs">{maskAccount(acct?.last4)}</span>
@@ -457,7 +518,7 @@ export default function TransactionsPage() {
                       {formatAmount(t.amount)}
                     </span>
                   </div>
-                  <CategorySelect txn={t} categories={categories} onChange={updateTransactionCategory} />
+                  <CategorySelect txn={t} categories={categories} onChange={updateTransactionCategory} sameMerchant={sameMerchant} />
                   <ManualActions txn={t} />
                 </li>
                 )

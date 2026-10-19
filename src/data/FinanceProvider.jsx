@@ -324,9 +324,10 @@ export default function FinanceProvider({ children }) {
   // Saves a category the user picked. The rules only allow category, categorySource
   // ("user") and updatedAt to change from the browser; the live listener above
   // updates the screen right away.
+  // Throws an Error with a message that can be shown to the user if it can't be saved.
   const updateTransactionCategory = useCallback(
     async (id, category) => {
-      if (!uid) return;
+      if (!uid) throw new Error("Please sign in again.");
       try {
         await updateDoc(doc(db, "users", uid, "transactions", id), {
           category,
@@ -335,6 +336,7 @@ export default function FinanceProvider({ children }) {
         });
       } catch (err) {
         console.error("Could not save category:", err.code, err.message);
+        throw new Error("Couldn't save. Try again.");
       }
     },
     [uid]
