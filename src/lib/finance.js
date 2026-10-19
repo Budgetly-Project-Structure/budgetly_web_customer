@@ -50,6 +50,21 @@ export function latestMonthWithData(transactions, currentMonth) {
 }
 
 /**
+ * The income a month's budget is based on (SCRUM-84): the money that came in that
+ * month, or, if nothing came in (e.g. only a credit card statement is imported),
+ * the monthly income the user entered on Settings.
+ *
+ * @param {number} moneyIn         The month's money in (monthTotals().income)
+ * @param {number|null} [monthlyIncome]  From Settings (profile.monthlyIncome)
+ * @returns {{amount: number, source: "money-in"|"setting"|null}} source null = no income to go on
+ */
+export function budgetIncome(moneyIn, monthlyIncome) {
+  if (moneyIn > 0) return { amount: moneyIn, source: "money-in" };
+  if (monthlyIncome > 0) return { amount: monthlyIncome, source: "setting" };
+  return { amount: 0, source: null };
+}
+
+/**
  * Adds up a month's money in and out.
  * @returns {{income: number, spending: number, net: number}} spending is a positive number
  */

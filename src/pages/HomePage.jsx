@@ -30,6 +30,7 @@ import { useFinance } from "../data/FinanceContext";
 import {
   BUDGET_STATUS,
   addMonths,
+  budgetIncome,
   budgetRows,
   generateInsights,
   isTransfer,
@@ -114,10 +115,12 @@ export default function HomePage() {
   const prevTotals = monthTotals(transactions, previousMonth);
   // One row per budget with spent, remaining, % used and status (see lib/finance.js)
   const rows = budgetRows(monthBudgets, transactions, month, categories);
-  // Budget card: the month's money in is the budget, and all money out counts against it.
-  // With no money in, fall back to the category limits and the spending in those categories.
-  const fromIncome = totals.income > 0;
-  const totalBudget = fromIncome ? totals.income : rows.reduce((s, r) => s + r.limit, 0);
+  // Budget card: the month's money in is the budget (or, with none, the monthly income
+  // from Settings), and all money out counts against it. With neither, fall back to the
+  // category limits and the spending in those categories.
+  const income = budgetIncome(totals.income, profile.monthlyIncome);
+  const fromIncome = income.source !== null;
+  const totalBudget = fromIncome ? income.amount : rows.reduce((s, r) => s + r.limit, 0);
   const budgetedSpent = fromIncome ? totals.spending : rows.reduce((s, r) => s + r.spent, 0);
   const pctUsed = totalBudget ? (budgetedSpent / totalBudget) * 100 : 0;
   const leftToSpend = totalBudget - budgetedSpent;
@@ -167,7 +170,7 @@ export default function HomePage() {
               </p>
             </div>
             <div>
-              <p className="text-xs text-textMuted mb-1">{fromIncome ? "Budget (money in)" : "Total budget"}</p>
+              <p className="text-xs text-textMuted mb-1">{income.source === "money-in" ? "Budget (money in)" : income.source === "setting" ? "Budget (monthly income)" : "Total budget"}</p>
               <p className="font-mono text-3xl font-semibold text-textLight tabular-nums">{formatCurrency(totalBudget)}</p>
             </div>
           </div>
@@ -180,11 +183,13 @@ export default function HomePage() {
               />
             </div>
             <p className="text-sm text-textMuted mt-2">
-              {fromIncome
+              {income.source === "money-in"
                 ? `You've spent ${Math.round(pctUsed)}% of the money that came in this ${monthName}.`
-                : totalBudget
-                  ? `No money came in this ${monthName}, so this uses your category budgets. You've used ${Math.round(pctUsed)}%.`
-                  : "No money in and no budgets set for this month. Your budget is the month's money in once a deposit shows up, or add budgets on the Budget page."}
+                : income.source === "setting"
+                  ? `No money came in this ${monthName}, so this uses your monthly income from Settings. You've spent ${Math.round(pctUsed)}%.`
+                  : totalBudget
+                  ? `No money came in this ${monthName}, so this uses your category budgets. You've used ${Math.round(pctUsed)}%. Tip: set your monthly income in Settings.`
+                  : "No money in and no budgets set for this month. Set your monthly income in Settings, or add budgets on the Budget page."}
             </p>
           </div>
         </div>

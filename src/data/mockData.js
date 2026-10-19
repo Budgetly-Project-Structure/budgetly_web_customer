@@ -166,9 +166,11 @@ export const STATEMENTS = [
 ];
 
 // The signed-in user's profile, shown in the top bar and on Settings.
-// Starts empty; FinanceProvider fills in the name and email from Firebase Auth.
+// Starts empty; FinanceProvider fills it in from Firebase Auth and users/{uid}.
+// monthlyIncome: dollars per month from Settings, or null when not set (SCRUM-84).
 export const PROFILE = {
   displayName: "",
   email: "",
+  monthlyIncome: null,
   createdAt: "2026-09-01",
 };
