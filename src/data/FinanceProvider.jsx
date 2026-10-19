@@ -8,18 +8,18 @@
  *   Data:    categories, accounts, currentMonth, previousMonth,
  *            transactions, budgets, statements (import history), profile, lastImport
  *   Actions: updateTransactionCategory, addTransaction, updateTransaction, deleteTransaction, setBudgetLimit, removeBudget, addCategory,
- *            addStatement, updateStatement, removeStatement, deleteStatement, setProfile
+ *            addStatement, updateStatement, removeStatement, deleteStatement, saveProfile
  *
  * Transactions, import history and budgets are live from Firestore (onSnapshot).
  * Budgets are users/{uid}/budgets/{categoryId} = { categoryId, limit, updatedAt }.
  * A limit is monthly, so it applies to every month; a new user has none.
- * The profile still starts as mock data and lives in React state, so
- * changes to it are lost on refresh. Categories the user makes are kept in
+ * The profile (name, email, and the monthly income from Settings) is live from
+ * users/{uid} (SCRUM-84); the name and email from Firebase Auth fill in until it loads. Categories the user makes are kept in
  * this browser (localStorage) until they move to Firestore too. The plan is to swap them for Firestore
  * here too; the pages won't need to change.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, updateProfile } from "firebase/auth";
 import {
   Timestamp,
   addDoc,
@@ -122,8 +122,7 @@ function loadDismissed(uid) {
 }
 
 /**
- * Transactions, imports and budgets come from Firestore; the profile is still in
- * memory.
+ * Transactions, imports, budgets and the profile come from Firestore.
  * Page components only talk to this provider, so swapping the data source later
  * won't touch the pages.
  */
@@ -196,6 +195,47 @@ export default function FinanceProvider({ children }) {
     );
   }, [uid]);
 
+  // Live profile and settings from users/{uid} (SCRUM-84): the name and the monthly
+  // income saved on Settings. Until it arrives, the name and email from Auth are used.
+  useEffect(() => {
+    if (!uid) return undefined;
+    return onSnapshot(
+      doc(db, "users", uid),
+      (snap) => {
+        const x = snap.data() ?? {};
+        setProfile((p) => ({
+          ...p,
+          displayName: x.displayName || p.displayName,
+          monthlyIncome: typeof x.monthlyIncome === "number" ? x.monthlyIncome : null,
+        }));
+      },
+      (err) => console.error("Could not load profile:", err.code, err.message)
+    );
+  }, [uid]);
+
+  /**
+   * Saves the name and monthly income from Settings to users/{uid}, and the name
+   * to the Firebase Auth profile too. monthlyIncome is dollars, or null to clear it.
+   * The live listener above puts the new values on screen.
+   * Throws an Error with a message that can be shown to the user.
+   */
+  const saveProfile = useCallback(
+    async ({ displayName, monthlyIncome }) => {
+      if (!uid) throw new Error("Please sign in again.");
+      try {
+        // merge: only these two fields change (the rules allow nothing else)
+        await setDoc(doc(db, "users", uid), { displayName, monthlyIncome }, { merge: true });
+        if (auth.currentUser && auth.currentUser.displayName !== displayName) {
+          await updateProfile(auth.currentUser, { displayName });
+        }
+      } catch (err) {
+        console.error("Could not save profile:", err.code, err.message);
+        throw new Error("We couldn't save your settings. Please try again.");
+      }
+    },
+    [uid]
+  );
+
   const budgets = useMemo(() => serverBudgets ?? [], [serverBudgets]);
   const budgetsLoading = Boolean(uid) && serverBudgets === null;
 
@@ -251,6 +291,8 @@ export default function FinanceProvider({ children }) {
             displayName: user.displayName || user.email?.split("@")[0] || "",
             email: user.email ?? "",
           }));
+        } else {
+          setProfile(PROFILE); // signed out: forget the last user's settings
         }
       }),
     []
@@ -478,7 +520,7 @@ export default function FinanceProvider({ children }) {
       updateStatement,
       removeStatement,
       deleteStatement,
-      setProfile,
+      saveProfile,
     }),
     [
       categories,
@@ -503,6 +545,7 @@ export default function FinanceProvider({ children }) {
       updateStatement,
       removeStatement,
       deleteStatement,
+      saveProfile,
     ]
   );
 

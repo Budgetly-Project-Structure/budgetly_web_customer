@@ -32,6 +32,7 @@ import { Card, CategoryIcon, EmptyState, MonthSwitcher, PageHeader, StatusChip, 
 import { useFinance } from "../data/FinanceContext";
 import {
   BUDGET_STATUS,
+  budgetIncome,
   budgetRows,
   latestMonthWithData,
   monthTotals,
@@ -395,10 +396,12 @@ export default function BudgetPage() {
   const totalSpent = rows.reduce((s, r) => s + r.spent, 0);
   const overCount = rows.filter((r) => r.status === "over").length;
 
-  // The budget is the money that came in during the shown month
+  // The budget is the money that came in during the shown month, or, if none did,
+  // the monthly income from Settings (SCRUM-84)
   const thisMonth = monthTotals(transactions, month);
-  const income = thisMonth.income;
-  const fromIncome = income > 0;
+  const incomeBase = budgetIncome(thisMonth.income, profile.monthlyIncome);
+  const income = incomeBase.amount;
+  const fromIncome = incomeBase.source !== null;
   // With money in, every dollar out counts; without it, only spending in budgeted categories (as before)
   const budgetTotal = fromIncome ? income : totalLimit;
   const spentTotal = fromIncome ? thisMonth.spending : totalSpent;
@@ -412,9 +415,9 @@ export default function BudgetPage() {
     (c) => !["income", "transfers", "uncategorized"].includes(c.id) && !rows.some((r) => r.categoryId === c.id)
   );
 
-  // Auto budget uses the same money in as the totals above.
+  // Auto budget uses the same income as the totals above.
   // Recomputed on every render while open, so the preview follows the savings field live.
-  const autoIncome = profile.monthlyIncome || income;
+  const autoIncome = income;
   const savingsNum = savingsInput.trim() === "" ? 0 : Number(savingsInput);
   const savingsError =
     !Number.isFinite(savingsNum) || savingsNum < 0
@@ -528,7 +531,11 @@ export default function BudgetPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-surface border border-line rounded-lg p-4">
           <p className="text-xs text-textMuted mb-2">
-            {fromIncome ? "Budget (money in)" : "Budget (category limits)"}
+            {incomeBase.source === "money-in"
+              ? "Budget (money in)"
+              : incomeBase.source === "setting"
+                ? "Budget (monthly income)"
+                : "Budget (category limits)"}
           </p>
           <p className="font-mono text-xl tabular-nums">{formatCurrency(budgetTotal)}</p>
         </div>
@@ -551,7 +558,7 @@ export default function BudgetPage() {
       {/* How the money in compares to the category limits below */}
       <p className="mt-3 mb-6 text-sm text-textMuted">
         {!fromIncome
-          ? `No money came in during ${monthName}, so the budget is your category limits added up. It switches to your money in once a deposit shows up.`
+          ? `No money came in during ${monthName}, so the budget is your category limits added up. Set your monthly income in Settings to budget from that instead.`
           : unassigned >= 0
             ? `${formatCurrency(totalLimit)} of ${formatCurrency(income)} assigned to categories, ${formatCurrency(unassigned)} unassigned${
                 unassigned > 0 && unassigned === appliedSavings ? " (savings)" : ""
