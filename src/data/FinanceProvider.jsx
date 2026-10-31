@@ -11,6 +11,10 @@
  *            addStatement, updateStatement, removeStatement, deleteStatement, saveProfile
  *
  * Transactions, import history and budgets are live from Firestore (onSnapshot).
+ * Transactions are one top-level collection, transactions/{id}, for every user; the owner is
+ * the userId field, and every query starts with where("userId", "==", uid) or the rules reject it
+ * (SCRUM-117). Deleting a manual transaction or a budget is a soft delete: deletedAt, deletedBy and
+ * purgeAfter are set, the server removes it for good later, and the live queries hide it.
  * Budgets are users/{uid}/budgets/{categoryId} = { categoryId, limit, updatedAt }.
  * A limit is monthly, so it applies to every month; a new user has none.
  * The profile (name, email, and the monthly income from Settings) is live from
@@ -18,13 +22,12 @@
  * this browser (localStorage) until they move to Firestore too. The plan is to swap them for Firestore
  * here too; the pages won't need to change.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { onAuthStateChanged, updateProfile } from "firebase/auth";
 import {
   Timestamp,
   addDoc,
   collection,
-  deleteDoc,
   doc,
   onSnapshot,
   orderBy,
@@ -32,6 +35,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
 } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../lib/firebase";
@@ -70,8 +74,8 @@ function statementFromDoc(d) {
 }
 
 /**
- * Turns a Firestore transaction doc (users/{uid}/transactions/{id}, written by
- * the import Cloud Function) into the shape the pages use.
+ * Turns a Firestore transaction doc (transactions/{id}, written by the import
+ * Cloud Function or by the manual form) into the shape the pages use.
  *   - date: stored as a Timestamp at 12:00 UTC; the pages want "YYYY-MM-DD"
  *   - isUserCorrected / categoryConfidence: derived from categorySource, because
  *     the Firestore rules only let the browser change category + categorySource
@@ -91,6 +95,20 @@ function transactionFromDoc(d) {
     accountId: x.accountId ?? null,
     sourceStatementId: x.sourceStatementId ?? null,
     source: x.source ?? "import", // "manual" = added by the user on the Transactions page (SCRUM-86)
+  };
+}
+
+// How long a deleted manual transaction or budget stays recoverable before the server may purge it.
+// Soft delete (data-model.md): the browser sets purgeAfter, the server removes the doc after it.
+const PURGE_AFTER_DAYS = 30;
+
+/** The three fields a soft delete sets (the Firestore rules check exactly these). */
+function softDeleteFields(uid) {
+  return {
+    deletedAt: serverTimestamp(),
+    deletedBy: uid,
+    purgeAfter: Timestamp.fromMillis(Date.now() + PURGE_AFTER_DAYS * 24 * 60 * 60 * 1000),
+    updatedAt: serverTimestamp(),
   };
 }
 
@@ -139,6 +157,9 @@ export default function FinanceProvider({ children }) {
   const [uid, setUid] = useState(null);
   const [profile, setProfile] = useState(PROFILE);
   const [customCategories, setCustomCategories] = useState([]);
+  // Budgets the user removed (soft deleted). Not shown, but remembered so that setting a
+  // limit on one restores it first.
+  const deletedBudgetIds = useRef(new Set());
 
   /**
    * Sets the monthly limit for a category: creates the budget or changes it.
@@ -148,7 +169,14 @@ export default function FinanceProvider({ children }) {
     async (categoryId, limit) => {
       if (!uid) return;
       try {
-        await setDoc(doc(db, "users", uid, "budgets", categoryId), { categoryId, limit, updatedAt: serverTimestamp() });
+        const ref = doc(db, "users", uid, "budgets", categoryId);
+        // A removed budget is only soft deleted, and the rules won't let a new limit
+        // quietly undo that, so restore it first.
+        if (deletedBudgetIds.current.has(categoryId)) {
+          await updateDoc(ref, { deletedAt: null, deletedBy: null, purgeAfter: null, updatedAt: serverTimestamp() });
+          deletedBudgetIds.current.delete(categoryId);
+        }
+        await setDoc(ref, { categoryId, limit, updatedAt: serverTimestamp() });
       } catch (err) {
         console.error("Could not save budget:", err.code, err.message);
       }
@@ -160,7 +188,8 @@ export default function FinanceProvider({ children }) {
     async (categoryId) => {
       if (!uid) return;
       try {
-        await deleteDoc(doc(db, "users", uid, "budgets", categoryId));
+        // Soft delete: the rules never allow a real delete from the browser
+        await updateDoc(doc(db, "users", uid, "budgets", categoryId), softDeleteFields(uid));
       } catch (err) {
         console.error("Could not remove budget:", err.code, err.message);
       }
@@ -178,16 +207,19 @@ export default function FinanceProvider({ children }) {
     setServerBudgets(null);
     return onSnapshot(
       collection(db, "users", uid, "budgets"),
-      (snap) =>
+      (snap) => {
+        const active = snap.docs.filter((d) => d.data().deletedAt == null);
+        deletedBudgetIds.current = new Set(snap.docs.filter((d) => d.data().deletedAt != null).map((d) => d.id));
         setServerBudgets(
-          snap.docs.map((d) => ({
+          active.map((d) => ({
             id: d.id,
             userId: uid,
             categoryId: d.data().categoryId ?? d.id,
             month: CURRENT_MONTH,
             limit: Number(d.data().limit) || 0,
           }))
-        ),
+        );
+      },
       (err) => {
         console.error("Could not load budgets:", err.code, err.message);
         setServerBudgets([]);
@@ -307,8 +339,11 @@ export default function FinanceProvider({ children }) {
     }
     setServerTransactions(null);
     setTransactionsError(null);
+    // The rules reject any query that isn't limited to the caller's own userId.
+    // deletedAt == null hides soft-deleted transactions. Both are equality filters,
+    // so no composite index is needed.
     return onSnapshot(
-      collection(db, "users", uid, "transactions"),
+      query(collection(db, "transactions"), where("userId", "==", uid), where("deletedAt", "==", null)),
       (snap) => setServerTransactions(snap.docs.map(transactionFromDoc).filter((t) => t.date)),
       (err) => {
         console.error("Could not load transactions:", err.code, err.message);
@@ -329,7 +364,7 @@ export default function FinanceProvider({ children }) {
     async (id, category) => {
       if (!uid) throw new Error("Please sign in again.");
       try {
-        await updateDoc(doc(db, "users", uid, "transactions", id), {
+        await updateDoc(doc(db, "transactions", id), {
           category,
           categorySource: "user",
           updatedAt: serverTimestamp(),
@@ -343,15 +378,15 @@ export default function FinanceProvider({ children }) {
   );
 
   // Manual transactions (SCRUM-86): the user's own entries, marked source "manual". The
-  // Firestore rules only let the browser create/edit/delete these, never imported ones.
+  // Firestore rules only let the browser create/edit/soft-delete these, never imported ones.
   // Each throws an Error with a message that can be shown on the form.
   /** Adds a transaction typed in by the user. `date` is "YYYY-MM-DD"; amount < 0 = spending. */
   const addTransaction = useCallback(
     async ({ date, merchant, amount, category, accountId }) => {
       if (!uid) throw new Error("You need to be logged in.");
       try {
-        await addDoc(collection(db, "users", uid, "transactions"), {
-          userId: uid,
+        await addDoc(collection(db, "transactions"), {
+          userId: uid, // the owner; the rules only accept your own uid here
           // Noon UTC, same as imported transactions, so the day never shifts with time zones
           date: Timestamp.fromDate(new Date(`${date}T12:00:00Z`)),
           merchant,
@@ -363,6 +398,9 @@ export default function FinanceProvider({ children }) {
           accountId: accountId ?? null,
           sourceStatementId: null,
           source: "manual",
+          deletedAt: null,
+          deletedBy: null,
+          purgeAfter: null,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -379,7 +417,7 @@ export default function FinanceProvider({ children }) {
     async (id, { date, merchant, amount, category, accountId }) => {
       if (!uid) throw new Error("You need to be logged in.");
       try {
-        await updateDoc(doc(db, "users", uid, "transactions", id), {
+        await updateDoc(doc(db, "transactions", id), {
           date: Timestamp.fromDate(new Date(`${date}T12:00:00Z`)),
           merchant,
           amount,
@@ -395,12 +433,12 @@ export default function FinanceProvider({ children }) {
     [uid]
   );
 
-  /** Deletes a manual transaction. */
+  /** Deletes a manual transaction (a soft delete: it is hidden now and purged by the server later). */
   const deleteTransaction = useCallback(
     async (id) => {
       if (!uid) return;
       try {
-        await deleteDoc(doc(db, "users", uid, "transactions", id));
+        await updateDoc(doc(db, "transactions", id), softDeleteFields(uid));
       } catch (err) {
         console.error("Could not delete transaction:", err.code, err.message);
         throw new Error("We couldn't delete this transaction. Please try again.");
