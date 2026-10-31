@@ -5,6 +5,7 @@ import Signup from "./components/Signup";
 import ConsentScreen from "./components/ConsentScreen";
 import RequireAuth from "./components/RequireAuth";
 import FinanceProvider from "./data/FinanceProvider";
+import ToastProvider from "./components/ToastProvider";
 import HomePage from "./pages/HomePage";
 import TransactionsPage from "./pages/TransactionsPage";
 import BudgetPage from "./pages/BudgetPage";
@@ -67,6 +68,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <FinanceProvider>
+        <ToastProvider>
         <Routes>
           {/* Public routes: anyone can open these */}
           <Route path="/login" element={<LoginPage />} />
@@ -88,6 +90,7 @@ export default function App() {
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ToastProvider>
       </FinanceProvider>
     </BrowserRouter>
   );

@@ -30,6 +30,7 @@ import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
 import { Card, CategoryIcon, EmptyState, MonthSwitcher, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
+import { useToast } from "../components/ToastContext";
 import {
   BUDGET_STATUS,
   budgetIncome,
@@ -369,8 +370,9 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
  * that don't have a budget yet. Only one limit can be edited at a time.
  */
 export default function BudgetPage() {
-  const { budgets, budgetsLoading, transactionsLoading, transactions, categories, currentMonth, profile, setBudgetLimit, removeBudget, addCategory } =
+  const { budgets, budgetsLoading, transactionsLoading, transactions, categories, currentMonth, profile, setBudgetLimit, removeBudget, restoreBudget, addCategory } =
     useFinance();
+  const { showToast } = useToast();
   // Which editor is open: an existing budget's categoryId, "new:<categoryId>"
   // for a category in "No budget yet", or null when nothing is being edited
   const [editing, setEditing] = useState(null);
@@ -593,9 +595,19 @@ export default function BudgetPage() {
                 setBudgetLimit(row.categoryId, limit);
                 setEditing(null);
               }}
-              onRemove={() => {
-                removeBudget(row.categoryId);
+              onRemove={async () => {
                 setEditing(null);
+                const removed = await removeBudget(row.categoryId);
+                if (!removed) {
+                  showToast({ message: `We couldn't remove the ${row.category.label} budget. Please try again.` });
+                  return;
+                }
+                // Removing is a soft delete, so Undo just restores it with its limit
+                showToast({
+                  message: `Removed the ${row.category.label} budget`,
+                  actionLabel: "Undo",
+                  onAction: () => restoreBudget(row.categoryId),
+                });
               }}
             />
           ))}
