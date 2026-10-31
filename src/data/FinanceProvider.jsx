@@ -191,14 +191,17 @@ export default function FinanceProvider({ children }) {
     [uid]
   );
 
+  /** Removes a budget (a soft delete). Returns true when it worked and false when it didn't. */
   const removeBudget = useCallback(
     async (categoryId) => {
-      if (!uid) return;
+      if (!uid) return false;
       try {
         // Soft delete: the rules never allow a real delete from the browser
         await updateDoc(doc(db, "users", uid, "budgets", categoryId), softDeleteFields(uid));
+        return true;
       } catch (err) {
         console.error("Could not remove budget:", err.code, err.message);
+        return false;
       }
     },
     [uid]

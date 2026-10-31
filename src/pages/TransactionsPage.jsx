@@ -28,6 +28,7 @@ import Icon from "../components/Icon";
 import ManualTransactionForm from "../components/ManualTransactionForm";
 import { Card, CategoryIcon, EmptyState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
+import { useToast } from "../components/ToastContext";
 import { isTransfer, needsReview } from "../lib/finance";
 import { formatAmount, formatDate, formatMonth, maskAccount } from "../lib/format";
 
@@ -157,7 +158,9 @@ export default function TransactionsPage() {
     addTransaction,
     updateTransaction,
     deleteTransaction,
+    restoreTransaction,
   } = useFinance();
+  const { showToast } = useToast();
   const [params, setParams] = useSearchParams();
 
   // Transactions grouped by merchant text, for "Also set N more from this merchant"
@@ -249,8 +252,15 @@ export default function TransactionsPage() {
 
   const removeManual = async (id) => {
     setRowError(null);
+    const name = transactions.find((t) => t.id === id)?.merchant;
     try {
       await deleteTransaction(id);
+      // Deleting is a soft delete, so Undo just restores it
+      showToast({
+        message: name ? `Deleted "${name}"` : "Transaction deleted",
+        actionLabel: "Undo",
+        onAction: () => restoreTransaction(id),
+      });
     } catch (err) {
       setRowError(err.message);
     }
