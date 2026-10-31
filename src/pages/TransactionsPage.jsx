@@ -210,7 +210,7 @@ export default function TransactionsPage() {
       if (type === "spending" && t.amount >= 0) return false;
       if (type === "income" && t.amount < 0) return false;
       if (reviewOnly && !needsReview(t)) return false;
-      if (q && !t.merchant.toLowerCase().includes(q)) return false;
+      if (q && !t.merchant.toLowerCase().includes(q) && !(t.rawMerchant ?? "").toLowerCase().includes(q)) return false;
       return true;
     });
     // dir flips the comparison for ascending vs descending.
@@ -486,7 +486,7 @@ export default function TransactionsPage() {
                         <td className="px-4 py-2.5">
                           <div className="flex items-center gap-3">
                             <CategoryIcon category={catById(t.category)} size="sm" />
-                            <span className="text-textLight">{t.merchant}</span>
+                            <span className="text-textLight" title={t.rawMerchant !== t.merchant ? t.rawMerchant : undefined}>{t.merchant}</span>
                             {t.source === "manual" && <span className="text-xs text-textMuted border border-line rounded px-1">Manual</span>}
                           </div>
                         </td>
@@ -524,7 +524,7 @@ export default function TransactionsPage() {
                 <li key={t.id} className="p-4">
                   <div className="flex items-start justify-between gap-3 mb-2">
                     <div className="min-w-0">
-                      <p className="text-sm text-textLight truncate">{t.merchant}</p>
+                      <p className="text-sm text-textLight truncate" title={t.rawMerchant !== t.merchant ? t.rawMerchant : undefined}>{t.merchant}</p>
                       <p className="text-xs text-textMuted">
                         {formatDate(t.date)} · {maskAccount(acctById(t.accountId)?.last4)}
                       </p>

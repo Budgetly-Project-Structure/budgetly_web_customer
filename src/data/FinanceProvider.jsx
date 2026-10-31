@@ -43,6 +43,7 @@ import {
 import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../lib/firebase";
 import { FinanceContext } from "./FinanceContext";
+import { cleanMerchant } from "../lib/merchantName";
 import {
   ACCOUNTS,
   CATEGORIES,
@@ -80,6 +81,7 @@ function statementFromDoc(d) {
  * Turns a Firestore transaction doc (transactions/{id}, written by the import
  * Cloud Function or by the manual form) into the shape the pages use.
  *   - date: stored as a Timestamp at 12:00 UTC; the pages want "YYYY-MM-DD"
+ *   - merchant: cleaned for imported transactions (lib/merchantName.js); rawMerchant keeps the statement text
  *   - isUserCorrected / categoryConfidence: derived from categorySource, because
  *     the Firestore rules only let the browser change category + categorySource
  */
@@ -90,7 +92,10 @@ function transactionFromDoc(d) {
     id: d.id,
     userId: x.userId ?? null,
     date: x.date?.toDate?.().toISOString().slice(0, 10) ?? null,
-    merchant: x.merchant ?? "",
+    // Imported transactions show a cleaned-up name ("Kwik Trip", not "KWIK TRIP #412").
+    // Manual ones are shown exactly as the user typed them. The raw text stays in Firestore.
+    merchant: x.source === "manual" ? (x.merchant ?? "") : cleanMerchant(x.merchant),
+    rawMerchant: x.merchant ?? "",
     amount: x.amount ?? 0,
     category: x.category ?? "uncategorized",
     categoryConfidence: x.categoryConfidence ?? (corrected ? 1 : 0),
