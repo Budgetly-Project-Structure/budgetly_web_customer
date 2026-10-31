@@ -7,14 +7,17 @@
  * What it provides:
  *   Data:    categories, accounts, currentMonth, previousMonth,
  *            transactions, budgets, statements (import history), profile, lastImport
- *   Actions: updateTransactionCategory, addTransaction, updateTransaction, deleteTransaction, setBudgetLimit, removeBudget, addCategory,
+ *   Deleted: deletedTransactions, deletedBudgets (soft deleted, still restorable; SCRUM-125)
+ *   Actions: updateTransactionCategory, addTransaction, updateTransaction, deleteTransaction, restoreTransaction,
+ *            setBudgetLimit, removeBudget, restoreBudget, addCategory,
  *            addStatement, updateStatement, removeStatement, deleteStatement, saveProfile
  *
  * Transactions, import history and budgets are live from Firestore (onSnapshot).
  * Transactions are one top-level collection, transactions/{id}, for every user; the owner is
  * the userId field, and every query starts with where("userId", "==", uid) or the rules reject it
  * (SCRUM-117). Deleting a manual transaction or a budget is a soft delete: deletedAt, deletedBy and
- * purgeAfter are set, the server removes it for good later, and the live queries hide it.
+ * purgeAfter are set and the server removes it for good later. The pages only see active items; the
+ * soft-deleted ones are listed separately (deletedTransactions, deletedBudgets) so they can be restored.
  * Budgets are users/{uid}/budgets/{categoryId} = { categoryId, limit, updatedAt }.
  * A limit is monthly, so it applies to every month; a new user has none.
  * The profile (name, email, and the monthly income from Settings) is live from
@@ -95,6 +98,9 @@ function transactionFromDoc(d) {
     accountId: x.accountId ?? null,
     sourceStatementId: x.sourceStatementId ?? null,
     source: x.source ?? "import", // "manual" = added by the user on the Transactions page (SCRUM-86)
+    // Soft delete: null while active. purgeAfter is when the server may remove it for good.
+    deletedAt: x.deletedAt?.toDate?.().toISOString() ?? null,
+    purgeAfter: x.purgeAfter?.toDate?.().toISOString() ?? null,
   };
 }
 
@@ -148,6 +154,7 @@ export default function FinanceProvider({ children }) {
   const [serverTransactions, setServerTransactions] = useState(null); // null = still loading
   const [transactionsError, setTransactionsError] = useState(null);
   const [serverBudgets, setServerBudgets] = useState(null); // null = still loading
+  const [serverDeletedBudgets, setServerDeletedBudgets] = useState([]); // soft deleted, restorable
   // Import history = uploads this browser is sending right now (pendingUploads)
   // + the server's import docs (serverImports, live from Firestore).
   const [pendingUploads, setPendingUploads] = useState([]);
@@ -197,19 +204,51 @@ export default function FinanceProvider({ children }) {
     [uid]
   );
 
+  /** Brings a removed budget back with the limit it had. */
+  const restoreBudget = useCallback(
+    async (categoryId) => {
+      if (!uid) throw new Error("You need to be logged in.");
+      try {
+        await updateDoc(doc(db, "users", uid, "budgets", categoryId), {
+          deletedAt: null,
+          deletedBy: null,
+          purgeAfter: null,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.error("Could not restore budget:", err.code, err.message);
+        throw new Error("We couldn't restore this budget. Please try again.");
+      }
+    },
+    [uid]
+  );
+
   // Live budgets from Firestore, in the shape the pages use. Limits are monthly,
   // so every budget is stamped with the current month.
   useEffect(() => {
     if (!uid) {
       setServerBudgets(null);
+      setServerDeletedBudgets([]);
       return undefined;
     }
     setServerBudgets(null);
+    setServerDeletedBudgets([]);
     return onSnapshot(
       collection(db, "users", uid, "budgets"),
       (snap) => {
         const active = snap.docs.filter((d) => d.data().deletedAt == null);
-        deletedBudgetIds.current = new Set(snap.docs.filter((d) => d.data().deletedAt != null).map((d) => d.id));
+        const deleted = snap.docs.filter((d) => d.data().deletedAt != null);
+        deletedBudgetIds.current = new Set(deleted.map((d) => d.id));
+        setServerDeletedBudgets(
+          deleted
+            .map((d) => ({
+              categoryId: d.data().categoryId ?? d.id,
+              limit: Number(d.data().limit) || 0,
+              deletedAt: d.data().deletedAt.toDate().toISOString(),
+              purgeAfter: d.data().purgeAfter?.toDate?.().toISOString() ?? null,
+            }))
+            .sort((a, b) => b.deletedAt.localeCompare(a.deletedAt))
+        );
         setServerBudgets(
           active.map((d) => ({
             id: d.id,
@@ -269,6 +308,7 @@ export default function FinanceProvider({ children }) {
   );
 
   const budgets = useMemo(() => serverBudgets ?? [], [serverBudgets]);
+  const deletedBudgets = serverDeletedBudgets;
   const budgetsLoading = Boolean(uid) && serverBudgets === null;
 
   // Built-in categories, then the user's own. A transaction can point at a custom
@@ -339,11 +379,10 @@ export default function FinanceProvider({ children }) {
     }
     setServerTransactions(null);
     setTransactionsError(null);
-    // The rules reject any query that isn't limited to the caller's own userId.
-    // deletedAt == null hides soft-deleted transactions. Both are equality filters,
-    // so no composite index is needed.
+    // The rules reject any query that isn't limited to the caller's own userId. This one
+    // filter needs no composite index; active and soft-deleted ones are split below.
     return onSnapshot(
-      query(collection(db, "transactions"), where("userId", "==", uid), where("deletedAt", "==", null)),
+      query(collection(db, "transactions"), where("userId", "==", uid)),
       (snap) => setServerTransactions(snap.docs.map(transactionFromDoc).filter((t) => t.date)),
       (err) => {
         console.error("Could not load transactions:", err.code, err.message);
@@ -353,7 +392,17 @@ export default function FinanceProvider({ children }) {
     );
   }, [uid]);
 
-  const transactions = useMemo(() => serverTransactions ?? [], [serverTransactions]);
+  // What the pages show: transactions that haven't been deleted
+  const transactions = useMemo(() => (serverTransactions ?? []).filter((t) => !t.deletedAt), [serverTransactions]);
+  // Soft-deleted manual transactions, newest deletion first (the Import page's "Recently deleted").
+  // Imported ones are never soft deleted from the app; the server removes them with their statement.
+  const deletedTransactions = useMemo(
+    () =>
+      (serverTransactions ?? [])
+        .filter((t) => t.deletedAt && t.source === "manual")
+        .sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
+    [serverTransactions]
+  );
   const transactionsLoading = Boolean(uid) && serverTransactions === null;
 
   // Saves a category the user picked. The rules only allow category, categorySource
@@ -442,6 +491,28 @@ export default function FinanceProvider({ children }) {
       } catch (err) {
         console.error("Could not delete transaction:", err.code, err.message);
         throw new Error("We couldn't delete this transaction. Please try again.");
+      }
+    },
+    [uid]
+  );
+
+  /**
+   * Brings a soft-deleted manual transaction back: clears the three delete fields
+   * (the Firestore rules only allow exactly that). The live listener puts it back on screen.
+   */
+  const restoreTransaction = useCallback(
+    async (id) => {
+      if (!uid) throw new Error("You need to be logged in.");
+      try {
+        await updateDoc(doc(db, "transactions", id), {
+          deletedAt: null,
+          deletedBy: null,
+          purgeAfter: null,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (err) {
+        console.error("Could not restore transaction:", err.code, err.message);
+        throw new Error("We couldn't restore this transaction. Please try again.");
       }
     },
     [uid]
@@ -542,8 +613,10 @@ export default function FinanceProvider({ children }) {
       transactions,
       transactionsLoading,
       transactionsError,
+      deletedTransactions,
       budgets,
       budgetsLoading,
+      deletedBudgets,
       statements,
       statementsLoading,
       statementsError,
@@ -553,8 +626,10 @@ export default function FinanceProvider({ children }) {
       addTransaction,
       updateTransaction,
       deleteTransaction,
+      restoreTransaction,
       setBudgetLimit,
       removeBudget,
+      restoreBudget,
       addCategory,
       addStatement,
       updateStatement,
@@ -567,8 +642,10 @@ export default function FinanceProvider({ children }) {
       transactions,
       transactionsLoading,
       transactionsError,
+      deletedTransactions,
       budgets,
       budgetsLoading,
+      deletedBudgets,
       statements,
       statementsLoading,
       statementsError,
@@ -578,8 +655,10 @@ export default function FinanceProvider({ children }) {
       addTransaction,
       updateTransaction,
       deleteTransaction,
+      restoreTransaction,
       setBudgetLimit,
       removeBudget,
+      restoreBudget,
       addCategory,
       addStatement,
       updateStatement,

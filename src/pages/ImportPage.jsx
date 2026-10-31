@@ -19,6 +19,10 @@
  * Cloud Function), which removes the file, the import record and every
  * transaction from it; the live listeners then update every page.
  *
+ * Recently deleted (SCRUM-125): manual transactions and budgets the user deleted stay
+ * recoverable for 30 days (a soft delete). This section lists them with a Restore button,
+ * and shows how many days are left before the server removes them for good.
+ *
  * Import history is live: FinanceProvider listens to users/{uid}/imports in
  * Firestore, so status changes (processing, completed, failed) appear here
  * without a refresh, and the history survives a page reload. A row for a file
@@ -35,7 +39,7 @@ import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
 import { Card, EmptyState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
-import { formatDateTime, maskAccount } from "../lib/format";
+import { formatAmount, formatCurrency, formatDate, formatDateTime, maskAccount } from "../lib/format";
 import { validateStatementFile } from "../lib/importValidation";
 import { uploadStatement } from "../lib/uploads";
 
@@ -114,6 +118,110 @@ function ConfirmDelete({ statement, deleting, error, onConfirm, onCancel }) {
   );
 }
 
+/** Whole days until the server may remove a soft-deleted item for good (null if unknown). */
+function daysLeft(purgeAfter) {
+  if (!purgeAfter) return null;
+  return Math.max(0, Math.ceil((new Date(purgeAfter).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
+}
+
+/** "Removed for good in 29 days" */
+function purgeNote(purgeAfter) {
+  const n = daysLeft(purgeAfter);
+  if (n === null) return "";
+  if (n === 0) return "Removed for good today";
+  return `Removed for good in ${n} ${n === 1 ? "day" : "days"}`;
+}
+
+/**
+ * The "Recently deleted" list: manual transactions and budgets that were soft deleted.
+ * Restore clears the delete fields; the live listeners then move the row back to its page.
+ *
+ * @param {Object[]} transactions  deletedTransactions from useFinance()
+ * @param {Object[]} budgets       deletedBudgets from useFinance()
+ * @param {Object[]} categories    to show category names
+ * @param {(id: string) => Promise<void>} onRestoreTransaction
+ * @param {(categoryId: string) => Promise<void>} onRestoreBudget
+ */
+function RecentlyDeleted({ transactions, budgets, categories, onRestoreTransaction, onRestoreBudget }) {
+  // Which row is being restored (disables its button), and the error from the last try
+  const [busy, setBusy] = useState(null);
+  const [error, setError] = useState("");
+
+  async function run(key, restore) {
+    setBusy(key);
+    setError("");
+    try {
+      await restore();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const categoryName = (id) => categories.find((c) => c.id === id)?.label ?? id;
+
+  return (
+    <Card title="Recently deleted" padded={false}>
+      {error && (
+        <p className="mx-5 mb-4 text-sm text-danger bg-danger/10 border border-danger/30 rounded-md px-4 py-3 flex items-center gap-2" role="alert">
+          <Icon name="alert" className="w-4 h-4 shrink-0" /> {error}
+        </p>
+      )}
+      {transactions.length === 0 && budgets.length === 0 ? (
+        <EmptyState
+          icon="trash"
+          title="Nothing deleted recently"
+          body="Transactions and budgets you delete stay here for 30 days, so you can bring them back."
+        />
+      ) : (
+        <ul className="divide-y divide-line border-t border-line">
+          {transactions.map((t) => (
+            <li key={t.id} className="px-5 py-3 flex flex-wrap items-center gap-3">
+              <div className="flex-1 min-w-[12rem]">
+                <p className="text-sm text-textLight break-words">
+                  {t.merchant} <span className="text-textMuted">· {formatAmount(t.amount)}</span>
+                </p>
+                <p className="text-xs text-textMuted">
+                  Transaction · {t.date ? formatDate(t.date) : ""} · {categoryName(t.category)} · {purgeNote(t.purgeAfter)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => run(`t-${t.id}`, () => onRestoreTransaction(t.id))}
+                disabled={busy === `t-${t.id}`}
+                className={buttonStyles.secondary}
+                aria-label={`Restore ${t.merchant}`}
+              >
+                {busy === `t-${t.id}` ? "Restoring…" : "Restore"}
+              </button>
+            </li>
+          ))}
+          {budgets.map((b) => (
+            <li key={b.categoryId} className="px-5 py-3 flex flex-wrap items-center gap-3">
+              <div className="flex-1 min-w-[12rem]">
+                <p className="text-sm text-textLight break-words">
+                  {categoryName(b.categoryId)} <span className="text-textMuted">· {formatCurrency(b.limit)} / month</span>
+                </p>
+                <p className="text-xs text-textMuted">Budget · {purgeNote(b.purgeAfter)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => run(`b-${b.categoryId}`, () => onRestoreBudget(b.categoryId))}
+                disabled={busy === `b-${b.categoryId}`}
+                className={buttonStyles.secondary}
+                aria-label={`Restore the ${categoryName(b.categoryId)} budget`}
+              >
+                {busy === `b-${b.categoryId}` ? "Restoring…" : "Restore"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
@@ -127,6 +235,11 @@ export default function ImportPage() {
     statementsLoading,
     statementsError,
     accounts,
+    categories,
+    deletedTransactions,
+    deletedBudgets,
+    restoreTransaction,
+    restoreBudget,
     addStatement,
     updateStatement,
     removeStatement,
@@ -452,6 +565,15 @@ export default function ImportPage() {
           </ul>
         )}
       </Card>
+
+      {/* ================= Recently deleted (SCRUM-125) ================= */}
+      <RecentlyDeleted
+        transactions={deletedTransactions}
+        budgets={deletedBudgets}
+        categories={categories}
+        onRestoreTransaction={restoreTransaction}
+        onRestoreBudget={restoreBudget}
+      />
 
       {toDelete && (
         <ConfirmDelete
