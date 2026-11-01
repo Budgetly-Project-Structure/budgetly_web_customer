@@ -523,9 +523,12 @@ export default function ImportPage() {
                     <div className="mt-3 ml-12 text-sm bg-danger/10 border border-danger/30 rounded-md px-3 py-2">
                       <p className="text-danger">{s.error || "Something went wrong with this import. Try uploading it again."}</p>
                       <div className="flex gap-4 mt-2">
-                        <button onClick={() => inputRef.current?.click()} className="text-xs text-textLight hover:underline">
-                          Try again
-                        </button>
+                        {/* Nothing new in the file: uploading it again would fail the same way */}
+                        {!s.error?.startsWith("Every transaction in this file was already imported") && (
+                          <button onClick={() => inputRef.current?.click()} className="text-xs text-textLight hover:underline">
+                            Try again
+                          </button>
+                        )}
                         {/* Server imports have Delete above; a failed upload from this browser can only be hidden */}
                         {!s.fromServer && (
                           <button onClick={() => removeStatement(s.id)} className="text-xs text-textMuted hover:text-textLight">
