@@ -26,7 +26,7 @@ import { useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Icon from "../components/Icon";
 import ManualTransactionForm from "../components/ManualTransactionForm";
-import { Card, CategoryIcon, EmptyState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
+import { Card, CategoryIcon, EmptyState, LoadingState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
 import { useToast } from "../components/ToastContext";
 import { isTransfer, needsReview } from "../lib/finance";
@@ -243,8 +243,10 @@ export default function TransactionsPage() {
   // Saves the form. After saving, show all months so the new or moved transaction
   // can't end up hidden by the month filter.
   const saveManual = async (values) => {
+    const wasEditing = Boolean(editing);
     if (editing) await updateTransaction(editing.id, values);
     else await addTransaction(values);
+    showToast({ message: wasEditing ? "Changes saved" : "Transaction added" });
     setMonth("all");
     setAdding(false);
     setEditing(null);
@@ -310,9 +312,7 @@ export default function TransactionsPage() {
         {!transactionsLoading && !transactionsError && form}
         <Card>
           {transactionsLoading ? (
-            <p className="py-12 text-center text-sm text-textMuted" role="status">
-              Loading your transactions…
-            </p>
+            <LoadingState label="Loading your transactions…" className="py-12" />
           ) : transactionsError ? (
             <EmptyState icon="alert" title="We couldn't load your transactions" body={transactionsError} />
           ) : (

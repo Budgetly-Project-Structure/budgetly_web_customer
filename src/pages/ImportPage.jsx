@@ -37,7 +37,8 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
-import { Card, EmptyState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
+import { useToast } from "../components/ToastContext";
+import { Card, EmptyState, LoadingState, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
 import { formatAmount, formatCurrency, formatDate, formatDateTime, maskAccount } from "../lib/format";
 import { validateStatementFile } from "../lib/importValidation";
@@ -146,12 +147,14 @@ function RecentlyDeleted({ transactions, budgets, categories, onRestoreTransacti
   // Which row is being restored (disables its button), and the error from the last try
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState("");
+  const { showToast } = useToast();
 
-  async function run(key, restore) {
+  async function run(key, restore, name) {
     setBusy(key);
     setError("");
     try {
       await restore();
+      showToast({ message: `Restored ${name}` });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -188,7 +191,7 @@ function RecentlyDeleted({ transactions, budgets, categories, onRestoreTransacti
               </div>
               <button
                 type="button"
-                onClick={() => run(`t-${t.id}`, () => onRestoreTransaction(t.id))}
+                onClick={() => run(`t-${t.id}`, () => onRestoreTransaction(t.id), `"${t.merchant}"`)}
                 disabled={busy === `t-${t.id}`}
                 className={buttonStyles.secondary}
                 aria-label={`Restore ${t.merchant}`}
@@ -207,7 +210,7 @@ function RecentlyDeleted({ transactions, budgets, categories, onRestoreTransacti
               </div>
               <button
                 type="button"
-                onClick={() => run(`b-${b.categoryId}`, () => onRestoreBudget(b.categoryId))}
+                onClick={() => run(`b-${b.categoryId}`, () => onRestoreBudget(b.categoryId), `the ${categoryName(b.categoryId)} budget`)}
                 disabled={busy === `b-${b.categoryId}`}
                 className={buttonStyles.secondary}
                 aria-label={`Restore the ${categoryName(b.categoryId)} budget`}
@@ -440,9 +443,7 @@ export default function ImportPage() {
 
         {statementsLoading && statements.length === 0 ? (
           // Waiting for the first snapshot from Firestore: don't flash "No statements yet"
-          <p className="px-5 py-8 text-sm text-textMuted text-center" role="status">
-            Loading your imports…
-          </p>
+          <LoadingState label="Loading your imports…" className="py-8" />
         ) : statements.length === 0 ? (
           <EmptyState icon="file" title="No statements yet" body="Your uploaded statements will show up here." />
         ) : (
@@ -471,6 +472,9 @@ export default function ImportPage() {
                       <span className="text-xs text-textMuted">
                         {s.transactionCount} {s.transactionCount === 1 ? "transaction" : "transactions"}
                         {s.skippedRowCount > 0 ? ` imported, ${s.skippedRowCount} skipped` : ""}
+                        {s.duplicateRowCount > 0
+                          ? `${s.skippedRowCount > 0 ? "," : " imported,"} ${s.duplicateRowCount} already imported`
+                          : ""}
                       </span>
                     )}
                     <StatusChip tone={st.tone} icon={st.icon}>

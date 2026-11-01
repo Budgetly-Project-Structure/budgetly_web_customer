@@ -25,7 +25,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
-import { Card, CategoryIcon, EmptyState, MonthSwitcher, StatusChip, buttonStyles } from "../components/ui";
+import { Card, CategoryIcon, EmptyState, LoadingState, MonthSwitcher, StatusChip, buttonStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
 import {
   BUDGET_STATUS,
@@ -68,11 +68,7 @@ export default function HomePage() {
 
   // Waiting for the first snapshot from Firestore: don't flash "no data yet"
   if (transactionsLoading || budgetsLoading) {
-    return (
-      <p className="py-16 text-center text-sm text-textMuted" role="status">
-        Loading your data…
-      </p>
-    );
+    return <LoadingState label="Loading your data…" />;
   }
 
   // Couldn't read from Firestore: say so, rather than telling a user with data to import

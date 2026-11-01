@@ -28,7 +28,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
-import { Card, CategoryIcon, EmptyState, MonthSwitcher, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
+import { Card, CategoryIcon, EmptyState, LoadingState, MonthSwitcher, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
 import { useToast } from "../components/ToastContext";
 import {
@@ -458,11 +458,26 @@ export default function BudgetPage() {
     }
   };
 
+  // Saves one limit and tells the user how it went
+  const saveLimit = async (categoryId, label, limit) => {
+    const saved = await setBudgetLimit(categoryId, limit);
+    showToast({
+      message: saved ? `Saved the ${label} budget: ${formatCurrency(limit)} / month` : `We couldn't save the ${label} budget. Please try again.`,
+    });
+  };
+
   // Saves every suggested limit (existing ones are updated, the rest created) and
   // removes budgets the suggestion doesn't cover, so the total matches the preview
-  const applyAutoBudget = () => {
-    for (const r of suggestion.rows) setBudgetLimit(r.categoryId, r.limit);
-    for (const id of removing) removeBudget(id);
+  const applyAutoBudget = async () => {
+    const results = await Promise.all([
+      ...suggestion.rows.map((r) => setBudgetLimit(r.categoryId, r.limit)),
+      ...[...removing].map((id) => removeBudget(id)),
+    ]);
+    showToast(
+      results.every(Boolean)
+        ? { message: "Auto budget applied" }
+        : { message: "Some budgets could not be saved. Please try again." }
+    );
     setAppliedSavings(suggestion.savings);
     setAutoOpen(false);
     setEditing(null);
@@ -470,11 +485,7 @@ export default function BudgetPage() {
 
   // Wait for Firestore, so a user with budgets doesn't see "No budgets set yet" for a moment
   if (budgetsLoading || transactionsLoading) {
-    return (
-      <p className="py-16 text-center text-sm text-textMuted" role="status">
-        Loading your budgets…
-      </p>
-    );
+    return <LoadingState label="Loading your budgets…" />;
   }
 
   return (
@@ -592,7 +603,7 @@ export default function BudgetPage() {
               onEdit={() => setEditing(row.categoryId)}
               onCancel={() => setEditing(null)}
               onSave={(limit) => {
-                setBudgetLimit(row.categoryId, limit);
+                saveLimit(row.categoryId, row.category.label, limit);
                 setEditing(null);
               }}
               onRemove={async () => {
@@ -656,7 +667,7 @@ export default function BudgetPage() {
                     initial={Math.max(50, Math.ceil((spent[c.id] || 0) / 10) * 10)}
                     onCancel={() => setEditing(null)}
                     onSave={(limit) => {
-                      setBudgetLimit(c.id, limit);
+                      saveLimit(c.id, c.label, limit);
                       setEditing(null);
                     }}
                   />

@@ -214,6 +214,30 @@ export function EmptyState({ icon = "file", title, body, action }) {
 }
 
 /**
+ * The one "still loading" message used on every screen: a small spinner and a line of text.
+ * role="status" makes screen readers read it out; the spinner stops for people who
+ * prefer reduced motion.
+ *
+ * @example
+ * <LoadingState label="Loading your budgets…" />
+ *
+ * @param {Object}  props
+ * @param {string}  [props.label="Loading…"] What is loading, e.g. "Loading your imports…".
+ * @param {string}  [props.className]        Spacing, e.g. "py-8". Defaults to "py-16".
+ */
+export function LoadingState({ label = "Loading…", className = "py-16" }) {
+  return (
+    <div className={`flex items-center justify-center gap-3 text-sm text-textMuted ${className}`} role="status">
+      <span
+        className="w-4 h-4 rounded-full border-2 border-line border-t-green animate-spin motion-reduce:animate-none"
+        aria-hidden="true"
+      />
+      {label}
+    </div>
+  );
+}
+
+/**
  * Tailwind class strings for buttons. They can be applied to <button> or <Link>
  * so both look identical.
  *
