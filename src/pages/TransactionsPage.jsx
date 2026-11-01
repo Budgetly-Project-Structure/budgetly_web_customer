@@ -174,9 +174,9 @@ export default function TransactionsPage() {
   }, [transactions]);
   const sameMerchant = (txn) => (byMerchant.get(txn.merchant) ?? []).filter((o) => o.id !== txn.id);
 
-  // Filter and sort state. Month defaults to the current month; newest first.
+  // Filter and sort state. Starts on all months (the data may be from earlier months); newest first.
   const [query, setQuery] = useState("");
-  const [month, setMonth] = useState(currentMonth);
+  const [month, setMonth] = useState("all");
   const [category, setCategory] = useState("all");
   const [type, setType] = useState("all");
   const [sort, setSort] = useState({ field: "date", dir: "desc" });
@@ -200,6 +200,14 @@ export default function TransactionsPage() {
   // Lookups from ids to full objects (for icons, labels, masked account numbers)
   const catById = (id) => categories.find((c) => c.id === id);
   const acctById = (id) => accounts.find((a) => a.id === id);
+
+  // Months for the Month filter: every month that has transactions, plus the current and
+  // previous month, newest first
+  const monthOptions = useMemo(() => {
+    const months = new Set([currentMonth, previousMonth]);
+    for (const t of transactions) if (t.date) months.add(t.date.slice(0, 7));
+    return [...months].sort().reverse();
+  }, [transactions, currentMonth, previousMonth]);
 
   // Apply every filter, then sort. useMemo re-runs this only when an input changes.
   const filtered = useMemo(() => {
@@ -399,9 +407,12 @@ export default function TransactionsPage() {
         </label>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 lg:flex">
           <select value={month} onChange={(e) => setMonth(e.target.value)} className={`${inputStyles} col-span-2 sm:col-span-1`} aria-label="Month">
-            <option value={currentMonth}>{formatMonth(currentMonth)}</option>
-            <option value={previousMonth}>{formatMonth(previousMonth)}</option>
             <option value="all">All time</option>
+            {monthOptions.map((m) => (
+              <option key={m} value={m}>
+                {formatMonth(m)}
+              </option>
+            ))}
           </select>
           <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputStyles} aria-label="Category">
             <option value="all">All categories</option>
