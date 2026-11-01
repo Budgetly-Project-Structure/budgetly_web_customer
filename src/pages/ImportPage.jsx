@@ -15,9 +15,9 @@
  *      transactions, and sets the record to "completed" or "failed".
  *
  * Delete: finished imports (completed, partly read, or failed) have a Delete
- * button. After a confirm dialog it calls deleteStatement() (the deleteImport
- * Cloud Function), which removes the file, the import record and every
- * transaction from it; the live listeners then update every page.
+ * button. After a confirm dialog it calls deleteStatement() (the softDeleteImport
+ * Cloud Function, SCRUM-120), which marks the import record and every transaction
+ * from it deleted for 30 days; the live listeners then update every page.
  *
  * Recently deleted (SCRUM-125): manual transactions and budgets the user deleted stay
  * recoverable for 30 days (a soft delete). This section lists them with a Restore button,
@@ -94,7 +94,7 @@ function ConfirmDelete({ statement, deleting, error, onConfirm, onCancel }) {
         </h2>
         <p className="text-sm text-textMuted mt-2 break-words">
           This removes <span className="text-textLight">{statement.fileName}</span>
-          {n > 0 ? ` and its ${n} ${n === 1 ? "transaction" : "transactions"}` : ""}. This can't be undone.
+          {n > 0 ? ` and its ${n} ${n === 1 ? "transaction" : "transactions"}` : ""}. You can restore it within 30 days.
         </p>
         {error && (
           <p className="text-sm text-danger mt-3" role="alert">

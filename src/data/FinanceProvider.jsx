@@ -75,6 +75,9 @@ function statementFromDoc(d) {
     storagePath: x.storagePath ?? null,
     fromServer: true, // a real import record (rows still uploading from this browser don't have this)
     uploadedAt: x.uploadedAt?.toDate?.().toISOString() ?? new Date().toISOString(),
+    // Set when the statement was deleted (SCRUM-120); it can be restored until purgeAfter
+    deletedAt: x.deletedAt?.toDate?.().toISOString() ?? null,
+    purgeAfter: x.purgeAfter?.toDate?.().toISOString() ?? null,
   };
 }
 
@@ -587,15 +590,16 @@ export default function FinanceProvider({ children }) {
   );
 
   /**
-   * Permanently deletes a server import: its transactions, its file in Storage and
-   * the import record (the deleteImport Cloud Function does all three). The live
-   * listeners above then drop the row and the transactions by themselves.
+   * Deletes a server import (SCRUM-120). It's a soft delete: the softDeleteImport
+   * Cloud Function marks the import record and its transactions deleted and keeps the
+   * file, so it can be restored for 30 days. The live listeners above then hide the
+   * row and the transactions by themselves.
    * Throws an Error with a message that can be shown to the user.
    */
   const deleteStatement = useCallback(async (id) => {
     try {
-      const { data } = await httpsCallable(functions, "deleteImport")({ importId: id });
-      return data; // { deletedTransactions }
+      const { data } = await httpsCallable(functions, "softDeleteImport")({ importId: id });
+      return data; // { deletedTransactions, purgeAfter }
     } catch (err) {
       console.error("Could not delete import:", err.code, err.message);
       // The function's own errors (not found, still importing...) have readable messages
@@ -608,7 +612,8 @@ export default function FinanceProvider({ children }) {
     const serverPaths = new Set((serverImports ?? []).map((s) => s.storagePath));
     // Hide a pending row once the server has its own doc for the same file
     const pending = pendingUploads.filter((p) => !p.storagePath || !serverPaths.has(p.storagePath));
-    const server = (serverImports ?? []).filter((s) => !dismissedIds.has(s.id));
+    // Deleted statements are hidden (their transactions are too, since they carry deletedAt)
+    const server = (serverImports ?? []).filter((s) => !dismissedIds.has(s.id) && !s.deletedAt);
     return [...pending, ...server];
   }, [pendingUploads, serverImports, dismissedIds]);
 
