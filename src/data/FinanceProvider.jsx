@@ -7,10 +7,11 @@
  * What it provides:
  *   Data:    categories, accounts, currentMonth, previousMonth,
  *            transactions, budgets, statements (import history), profile, lastImport
- *   Deleted: deletedTransactions, deletedBudgets (soft deleted, still restorable; SCRUM-125)
+ *   Deleted: deletedTransactions, deletedBudgets (soft deleted, still restorable; SCRUM-125),
+ *            deletedStatements (SCRUM-121)
  *   Actions: updateTransactionCategory, addTransaction, updateTransaction, deleteTransaction, restoreTransaction,
  *            setBudgetLimit, removeBudget, restoreBudget, addCategory,
- *            addStatement, updateStatement, removeStatement, deleteStatement, saveProfile
+ *            addStatement, updateStatement, removeStatement, deleteStatement, restoreStatement, saveProfile
  *
  * Transactions, import history and budgets are live from Firestore (onSnapshot).
  * Transactions are one top-level collection, transactions/{id}, for every user; the owner is
@@ -75,6 +76,9 @@ function statementFromDoc(d) {
     storagePath: x.storagePath ?? null,
     fromServer: true, // a real import record (rows still uploading from this browser don't have this)
     uploadedAt: x.uploadedAt?.toDate?.().toISOString() ?? new Date().toISOString(),
+    // Set when the statement was deleted (SCRUM-120); it can be restored until purgeAfter
+    deletedAt: x.deletedAt?.toDate?.().toISOString() ?? null,
+    purgeAfter: x.purgeAfter?.toDate?.().toISOString() ?? null,
   };
 }
 
@@ -587,15 +591,16 @@ export default function FinanceProvider({ children }) {
   );
 
   /**
-   * Permanently deletes a server import: its transactions, its file in Storage and
-   * the import record (the deleteImport Cloud Function does all three). The live
-   * listeners above then drop the row and the transactions by themselves.
+   * Deletes a server import (SCRUM-120). It's a soft delete: the softDeleteImport
+   * Cloud Function marks the import record and its transactions deleted and keeps the
+   * file, so it can be restored for 30 days. The live listeners above then hide the
+   * row and the transactions by themselves.
    * Throws an Error with a message that can be shown to the user.
    */
   const deleteStatement = useCallback(async (id) => {
     try {
-      const { data } = await httpsCallable(functions, "deleteImport")({ importId: id });
-      return data; // { deletedTransactions }
+      const { data } = await httpsCallable(functions, "softDeleteImport")({ importId: id });
+      return data; // { deletedTransactions, purgeAfter }
     } catch (err) {
       console.error("Could not delete import:", err.code, err.message);
       // The function's own errors (not found, still importing...) have readable messages
@@ -608,11 +613,36 @@ export default function FinanceProvider({ children }) {
     const serverPaths = new Set((serverImports ?? []).map((s) => s.storagePath));
     // Hide a pending row once the server has its own doc for the same file
     const pending = pendingUploads.filter((p) => !p.storagePath || !serverPaths.has(p.storagePath));
-    const server = (serverImports ?? []).filter((s) => !dismissedIds.has(s.id));
+    // Deleted statements are hidden (their transactions are too, since they carry deletedAt)
+    const server = (serverImports ?? []).filter((s) => !dismissedIds.has(s.id) && !s.deletedAt);
     return [...pending, ...server];
   }, [pendingUploads, serverImports, dismissedIds]);
 
   const statementsLoading = Boolean(uid) && serverImports === null;
+
+  // Deleted statements, newest deletion first (the Import page's "Recently deleted", SCRUM-121)
+  const deletedStatements = useMemo(
+    () => (serverImports ?? []).filter((s) => s.deletedAt).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
+    [serverImports]
+  );
+
+  /**
+   * Brings back a deleted statement and its transactions (SCRUM-121). The
+   * restoreImport Cloud Function clears the delete fields; the live listeners then
+   * put the row and the transactions back on every page.
+   * Throws an Error with a message that can be shown to the user.
+   */
+  const restoreStatement = useCallback(async (id) => {
+    try {
+      const { data } = await httpsCallable(functions, "restoreImport")({ importId: id });
+      return data; // { restoredTransactions }
+    } catch (err) {
+      console.error("Could not restore import:", err.code, err.message);
+      // The function's own errors (too late, not deleted...) have readable messages
+      const readable = ["functions/not-found", "functions/failed-precondition", "functions/permission-denied", "functions/unauthenticated"];
+      throw new Error(readable.includes(err.code) ? err.message : "We couldn't restore this statement. Please try again.");
+    }
+  }, []);
 
   const lastImport = statements.find((s) => s.status === "completed");
 
@@ -629,6 +659,7 @@ export default function FinanceProvider({ children }) {
       budgets,
       budgetsLoading,
       deletedBudgets,
+      deletedStatements,
       statements,
       statementsLoading,
       statementsError,
@@ -647,6 +678,7 @@ export default function FinanceProvider({ children }) {
       updateStatement,
       removeStatement,
       deleteStatement,
+      restoreStatement,
       saveProfile,
     }),
     [
@@ -658,6 +690,7 @@ export default function FinanceProvider({ children }) {
       budgets,
       budgetsLoading,
       deletedBudgets,
+      deletedStatements,
       statements,
       statementsLoading,
       statementsError,
@@ -676,6 +709,7 @@ export default function FinanceProvider({ children }) {
       updateStatement,
       removeStatement,
       deleteStatement,
+      restoreStatement,
       saveProfile,
     ]
   );
