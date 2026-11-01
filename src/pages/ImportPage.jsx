@@ -19,7 +19,7 @@
  * Cloud Function, SCRUM-120), which marks the import record and every transaction
  * from it deleted for 30 days; the live listeners then update every page.
  *
- * Recently deleted (SCRUM-125): manual transactions and budgets the user deleted stay
+ * Recently deleted (SCRUM-125): statements (SCRUM-121), manual transactions and budgets the user deleted stay
  * recoverable for 30 days (a soft delete). This section lists them with a Restore button,
  * and shows how many days are left before the server removes them for good.
  *
@@ -134,16 +134,18 @@ function purgeNote(purgeAfter) {
 }
 
 /**
- * The "Recently deleted" list: manual transactions and budgets that were soft deleted.
- * Restore clears the delete fields; the live listeners then move the row back to its page.
+ * The "Recently deleted" list: statements, manual transactions and budgets that were soft
+ * deleted. Restore clears the delete fields; the live listeners then move the row back to its page.
  *
+ * @param {Object[]} statements    deletedStatements from useFinance() (SCRUM-121)
  * @param {Object[]} transactions  deletedTransactions from useFinance()
  * @param {Object[]} budgets       deletedBudgets from useFinance()
  * @param {Object[]} categories    to show category names
+ * @param {(id: string) => Promise<Object>} onRestoreStatement  restoreImport; brings its transactions back too
  * @param {(id: string) => Promise<void>} onRestoreTransaction
  * @param {(categoryId: string) => Promise<void>} onRestoreBudget
  */
-function RecentlyDeleted({ transactions, budgets, categories, onRestoreTransaction, onRestoreBudget }) {
+function RecentlyDeleted({ statements, transactions, budgets, categories, onRestoreStatement, onRestoreTransaction, onRestoreBudget }) {
   // Which row is being restored (disables its button), and the error from the last try
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState("");
@@ -171,14 +173,36 @@ function RecentlyDeleted({ transactions, budgets, categories, onRestoreTransacti
           <Icon name="alert" className="w-4 h-4 shrink-0" /> {error}
         </p>
       )}
-      {transactions.length === 0 && budgets.length === 0 ? (
+      {statements.length === 0 && transactions.length === 0 && budgets.length === 0 ? (
         <EmptyState
           icon="trash"
           title="Nothing deleted recently"
-          body="Transactions and budgets you delete stay here for 30 days, so you can bring them back."
+          body="Statements, transactions and budgets you delete stay here for 30 days, so you can bring them back."
         />
       ) : (
         <ul className="divide-y divide-line border-t border-line">
+          {statements.map((s) => (
+            <li key={s.id} className="px-5 py-3 flex flex-wrap items-center gap-3">
+              <div className="flex-1 min-w-[12rem]">
+                <p className="text-sm text-textLight break-words">
+                  {s.fileName}{" "}
+                  <span className="text-textMuted">
+                    · {s.transactionCount} {s.transactionCount === 1 ? "transaction" : "transactions"}
+                  </span>
+                </p>
+                <p className="text-xs text-textMuted">Statement · {purgeNote(s.purgeAfter)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => run(`s-${s.id}`, () => onRestoreStatement(s.id), `"${s.fileName}"`)}
+                disabled={busy === `s-${s.id}`}
+                className={buttonStyles.secondary}
+                aria-label={`Restore ${s.fileName}`}
+              >
+                {busy === `s-${s.id}` ? "Restoring…" : "Restore"}
+              </button>
+            </li>
+          ))}
           {transactions.map((t) => (
             <li key={t.id} className="px-5 py-3 flex flex-wrap items-center gap-3">
               <div className="flex-1 min-w-[12rem]">
@@ -241,6 +265,8 @@ export default function ImportPage() {
     categories,
     deletedTransactions,
     deletedBudgets,
+    deletedStatements,
+    restoreStatement,
     restoreTransaction,
     restoreBudget,
     addStatement,
@@ -575,9 +601,11 @@ export default function ImportPage() {
 
       {/* ================= Recently deleted (SCRUM-125) ================= */}
       <RecentlyDeleted
+        statements={deletedStatements}
         transactions={deletedTransactions}
         budgets={deletedBudgets}
         categories={categories}
+        onRestoreStatement={restoreStatement}
         onRestoreTransaction={restoreTransaction}
         onRestoreBudget={restoreBudget}
       />
