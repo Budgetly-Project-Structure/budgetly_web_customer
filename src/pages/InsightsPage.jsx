@@ -14,9 +14,9 @@
  */
 import { useState } from "react";
 import Icon from "../components/Icon";
-import { Card, PageHeader, buttonStyles, inputStyles } from "../components/ui";
+import { Card, EmptyState, LoadingState, PageHeader, buttonStyles, inputStyles } from "../components/ui";
 import { useFinance } from "../data/FinanceContext";
-import { answerSpendingQuestion, generateInsights, spendingByCategory } from "../lib/finance";
+import { addMonths, answerSpendingQuestion, generateInsights, latestMonthWithData, spendingByCategory } from "../lib/finance";
 import { formatCurrency, formatMonth } from "../lib/format";
 
 // How each insight "tone" looks: an icon + color. "warn" = spending went up, "good" = went down.
@@ -105,7 +105,11 @@ function CategoryComparisonChart({ rows, currentLabel, previousLabel }) {
 
 /** Insights page component. */
 export default function InsightsPage() {
-  const { transactions, categories, budgets, currentMonth, previousMonth } = useFinance();
+  const { transactions, transactionsLoading, categories, budgets, currentMonth: today } = useFinance();
+  // Newest month with transactions (never later than today), so statements from earlier
+  // months still show something. The month before it is the comparison.
+  const currentMonth = latestMonthWithData(transactions, today) || today;
+  const previousMonth = addMonths(currentMonth, -1);
   // question = text in the box; answer = { q, res } for the last question asked;
   // showTable = chart vs table view
   const [question, setQuestion] = useState("");
@@ -138,9 +142,14 @@ export default function InsightsPage() {
     setAnswer({ q: text, res });
   }
 
+  if (transactionsLoading) return <LoadingState label="Loading your insights…" />;
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Insights" description={`What stands out in ${formatMonth(currentMonth)} so far.`} />
+      <PageHeader
+        title="Insights"
+        description={`What stands out in ${formatMonth(currentMonth)}${currentMonth === today ? " so far" : ""}.`}
+      />
 
       {/* Ask a question */}
       <Card>
@@ -249,12 +258,16 @@ export default function InsightsPage() {
               })}
             </tbody>
           </table>
+        ) : chartRows.length === 0 ? (
+          <EmptyState icon="file" title="No spending to compare yet" body="Import a statement to see spending by category here." />
         ) : (
           <CategoryComparisonChart rows={chartRows} currentLabel={currentLabel} previousLabel={previousLabel} />
         )}
-        <p className="text-xs text-textMuted mt-4">
-          {currentLabel} is month-to-date; {previousLabel} is the full month.
-        </p>
+        {currentMonth === today && (
+          <p className="text-xs text-textMuted mt-4">
+            {currentLabel} is month-to-date; {previousLabel} is the full month.
+          </p>
+        )}
       </Card>
     </div>
   );
