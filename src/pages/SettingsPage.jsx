@@ -13,7 +13,8 @@
  * permissions field and a deleteUserData Cloud Function).
  */
 import { useState } from "react";
-import { Card, PageHeader, StatusChip, buttonStyles, inputStyles } from "../components/ui";
+import { Card, PageHeader, buttonStyles, inputStyles } from "../components/ui";
+import { useToast } from "../components/ToastContext";
 import { useFinance } from "../data/FinanceContext";
 import { maskAccount } from "../lib/format";
 
@@ -64,6 +65,7 @@ function Toggle({ checked, onChange, label }) {
  * @param {(status: string|null) => void} setStatus
  */
 function ProfileForm({ profile, onSave, status, setStatus }) {
+  const { showToast } = useToast();
   // What's typed in the boxes. Income is text so the box can be empty (= not set).
   const [name, setName] = useState(profile.displayName);
   const [income, setIncome] = useState(profile.monthlyIncome == null ? "" : String(profile.monthlyIncome));
@@ -90,8 +92,8 @@ function ProfileForm({ profile, onSave, status, setStatus }) {
         try {
           // Whole cents only
           await onSave({ displayName: trimmed, monthlyIncome: incomeValue === null ? null : Math.round(incomeValue * 100) / 100 });
-          setStatus("saved");
-          setTimeout(() => setStatus((s) => (s === "saved" ? null : s)), 2000);
+          setStatus(null);
+          showToast({ message: "Settings saved" });
         } catch (err) {
           setStatus(err.message);
         }
@@ -135,12 +137,7 @@ function ProfileForm({ profile, onSave, status, setStatus }) {
         <button type="submit" disabled={!canSave} className={buttonStyles.primary}>
           {status === "saving" ? "Saving…" : "Save changes"}
         </button>
-        {status === "saved" && (
-          <StatusChip tone="ok" icon="check">
-            Saved
-          </StatusChip>
-        )}
-        {status && status !== "saving" && status !== "saved" && (
+        {status && status !== "saving" && (
           <span className="text-sm text-danger" role="alert">
             {status}
           </span>

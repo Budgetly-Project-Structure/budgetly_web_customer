@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "../lib/firebase";
+import { LoadingState } from "./ui";
 
 export default function RequireAuth() {
   // undefined = still checking, null = logged out, object = logged-in user
@@ -29,8 +30,8 @@ export default function RequireAuth() {
 
   if (user === undefined) {
     return (
-      <div className="min-h-screen bg-charcoal flex items-center justify-center text-sm text-textMuted">
-        Loading…
+      <div className="min-h-screen bg-charcoal flex items-center justify-center">
+        <LoadingState label="Loading…" className="" />
       </div>
     );
   }

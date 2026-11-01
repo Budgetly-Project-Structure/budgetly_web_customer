@@ -68,6 +68,7 @@ function statementFromDoc(d) {
     status: x.status ?? "uploaded", // uploaded → processing → completed | failed
     transactionCount: x.transactionCount ?? 0,
     skippedRowCount: x.skippedRowCount ?? 0, // rows the parser couldn't read
+    duplicateRowCount: x.duplicateRowCount ?? 0, // rows an earlier statement already saved (SCRUM-136)
     rowErrors: x.rowErrors ?? [], // [{ row, reason }]
     error: x.error ?? null, // user-facing message when status is "failed"
     size: x.sizeBytes ?? 0,
@@ -176,10 +177,11 @@ export default function FinanceProvider({ children }) {
   /**
    * Sets the monthly limit for a category: creates the budget or changes it.
    * The live listener below puts it on screen right away.
+   * Returns true when it worked and false when it didn't.
    */
   const setBudgetLimit = useCallback(
     async (categoryId, limit) => {
-      if (!uid) return;
+      if (!uid) return false;
       try {
         const ref = doc(db, "users", uid, "budgets", categoryId);
         // A removed budget is only soft deleted, and the rules won't let a new limit
@@ -189,8 +191,10 @@ export default function FinanceProvider({ children }) {
           deletedBudgetIds.current.delete(categoryId);
         }
         await setDoc(ref, { categoryId, limit, updatedAt: serverTimestamp() });
+        return true;
       } catch (err) {
         console.error("Could not save budget:", err.code, err.message);
+        return false;
       }
     },
     [uid]
