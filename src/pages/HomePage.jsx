@@ -121,6 +121,10 @@ export default function HomePage() {
   const pctUsed = totalBudget ? (budgetedSpent / totalBudget) * 100 : 0;
   const leftToSpend = totalBudget - budgetedSpent;
   const monthName = formatMonth(month).split(" ")[0];
+  // "Left over" tile: money in minus money out. With no money in this month, use the
+  // monthly income from Settings like the budget card does; with neither there is
+  // nothing to compare against, so show a neutral dash instead of an alarming negative.
+  const leftOver = totals.income > 0 || income.source === "setting" ? income.amount - totals.spending : null;
 
   // Newest 6 transactions this month (ISO dates sort correctly as strings)
   const recent = transactions
@@ -208,13 +212,13 @@ export default function HomePage() {
         />
         <SummaryTile
           label="Left over"
-          value={formatCurrency(totals.net)}
+          value={leftOver === null ? "—" : formatCurrency(leftOver)}
           sub={
-            totals.net >= 0
-              ? `You saved ${formatCurrency(totals.net)}`
-              : `You spent ${formatCurrency(-totals.net)} more than you earned`
+            leftOver === null
+              ? "No money in this month"
+              : `${leftOver >= 0 ? `You saved ${formatCurrency(leftOver)}` : `You spent ${formatCurrency(-leftOver)} more than you earned`}${income.source === "setting" ? " (using your monthly income)" : ""}`
           }
-          subTone={totals.net >= 0 ? "good" : "warn"}
+          subTone={leftOver === null ? "muted" : leftOver >= 0 ? "good" : "warn"}
         />
         <SummaryTile
           label="Needs a quick check"
