@@ -315,7 +315,7 @@ export default function HomePage() {
                   <p className="text-sm text-textLight font-medium">
                     {reviewCount} transactions need a category check
                   </p>
-                  <p className="text-sm text-textMuted mt-1">The AI wasn't confident about these. Takes a few seconds.</p>
+                  <p className="text-sm text-textMuted mt-1">We couldn't pick a category for these with confidence. Takes a few seconds.</p>
                   <Link to="/transactions?review=1" className={`${buttonStyles.ghost} mt-3`}>
                     Review now <Icon name="chevronRight" className="w-3.5 h-3.5" />
                   </Link>
