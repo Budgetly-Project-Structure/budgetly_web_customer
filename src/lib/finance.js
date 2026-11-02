@@ -250,6 +250,47 @@ export function suggestBudgets(transactions, month, categories, monthlyIncome, s
 }
 
 /**
+ * The budget that sets itself at the start of each month (SCRUM-137): which limits
+ * Auto budget (suggestBudgets above) would save for `month`. Plain function, no
+ * Firestore, so it can be tested on its own; FinanceProvider does the saving.
+ *
+ * It only ever writes limits Auto budget owns:
+ *   - a category with no budget gets one
+ *   - a budget Auto budget set before (source "auto") is refreshed
+ *   - a limit the user typed in (source "user", or older budgets with no source) is kept
+ *   - a budget the user removed (soft deleted) stays removed
+ *   - nothing is ever removed, so custom categories and their budgets carry over
+ *
+ * @param {Object}   opts
+ * @param {Object[]} opts.transactions
+ * @param {string}   opts.month            "YYYY-MM" the budget is for
+ * @param {Object[]} opts.categories
+ * @param {{categoryId: string, source?: string}[]} opts.budgets  active budgets
+ * @param {string[]} [opts.deletedCategoryIds]  categories whose budget was removed
+ * @param {number}   [opts.monthlyIncome]  from Settings; without it the recent average money in is used
+ * @param {number}   [opts.savings=0]      carried over from the last month's budget
+ * @returns {{writes: {categoryId: string, limit: number}[], suggestion: Object}}
+ *          writes is empty when there's nothing to learn from yet or nothing to change
+ */
+export function planMonthlyBudget({ transactions, month, categories, budgets, deletedCategoryIds = [], monthlyIncome, savings = 0 }) {
+  const suggestion = suggestBudgets(transactions, month, categories, monthlyIncome, savings);
+  const writes = suggestion.rows
+    .filter((r) => !deletedCategoryIds.includes(r.categoryId))
+    .filter((r) => {
+      const existing = budgets.find((b) => b.categoryId === r.categoryId);
+      return !existing || existing.source === "auto";
+    })
+    .map((r) => ({ categoryId: r.categoryId, limit: r.limit }));
+  return { writes, suggestion };
+}
+
+/** The savings kept in the newest month before `month` that has a saved budget, or 0. */
+export function carriedOverSavings(monthMarkers, month) {
+  const previous = monthMarkers.filter((m) => m.month < month).sort((a, b) => b.month.localeCompare(a.month))[0];
+  return previous?.savings ?? 0;
+}
+
+/**
  * Rule-based monthly insights. Stand-in for the AI-generated insights Cloud Function —
  * same output shape ({ id, tone, title, body }) so the UI won't change when that lands.
  */

@@ -6,11 +6,12 @@
  *
  * What it provides:
  *   Data:    categories, accounts, currentMonth, previousMonth,
- *            transactions, budgets, statements (import history), profile, lastImport
+ *            transactions, budgets, statements (import history), profile, lastImport,
+ *            autoBudgetMonth (the month the budget set itself, SCRUM-137)
  *   Deleted: deletedTransactions, deletedBudgets (soft deleted, still restorable; SCRUM-125),
  *            deletedStatements (SCRUM-121)
  *   Actions: updateTransactionCategory, addTransaction, updateTransaction, deleteTransaction, restoreTransaction,
- *            setBudgetLimit, removeBudget, restoreBudget, addCategory,
+ *            setBudgetLimit, removeBudget, restoreBudget, saveMonthSavings, addCategory,
  *            addStatement, updateStatement, removeStatement, deleteStatement, restoreStatement, saveProfile
  *
  * Transactions, import history and budgets are live from Firestore (onSnapshot).
@@ -19,8 +20,12 @@
  * (SCRUM-117). Deleting a manual transaction or a budget is a soft delete: deletedAt, deletedBy and
  * purgeAfter are set and the server removes it for good later. The pages only see active items; the
  * soft-deleted ones are listed separately (deletedTransactions, deletedBudgets) so they can be restored.
- * Budgets are users/{uid}/budgets/{categoryId} = { categoryId, limit, updatedAt }.
- * A limit is monthly, so it applies to every month; a new user has none.
+ * Budgets are users/{uid}/budgets/{categoryId} = { categoryId, limit, source, updatedAt }.
+ * A limit is monthly, so it applies to every month; a new user has none. source is "auto"
+ * when Auto budget set it and "user" when the user typed it in (older budgets have none = "user").
+ * Each month the budget sets itself once (SCRUM-137, planMonthlyBudget in lib/finance.js):
+ * users/{uid}/budgetMonths/{YYYY-MM} = { month, auto, savings, createdAt } records that it
+ * happened (and the savings kept), so it runs only once per month even with two tabs open.
  * The profile (name, email, and the monthly income from Settings) is live from
  * users/{uid} (SCRUM-84); the name and email from Firebase Auth fill in until it loads. Categories the user makes are kept in
  * this browser (localStorage) until they move to Firestore too. The plan is to swap them for Firestore
@@ -45,6 +50,7 @@ import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../lib/firebase";
 import { FinanceContext } from "./FinanceContext";
 import { cleanMerchant } from "../lib/merchantName";
+import { carriedOverSavings, planMonthlyBudget } from "../lib/finance";
 import {
   ACCOUNTS,
   CATEGORIES,
@@ -177,17 +183,22 @@ export default function FinanceProvider({ children }) {
   const [uid, setUid] = useState(null);
   const [profile, setProfile] = useState(PROFILE);
   const [customCategories, setCustomCategories] = useState([]);
+  // users/{uid}/budgetMonths: one record per month whose budget was set (SCRUM-137)
+  const [monthMarkerState, setMonthMarkerState] = useState({ uid: null, list: [] });
+  const monthMarkers = uid && monthMarkerState.uid === uid ? monthMarkerState.list : null; // null = loading
   // Budgets the user removed (soft deleted). Not shown, but remembered so that setting a
   // limit on one restores it first.
   const deletedBudgetIds = useRef(new Set());
 
   /**
    * Sets the monthly limit for a category: creates the budget or changes it.
+   * source is "user" for a limit typed in, "auto" for one Auto budget chose (only
+   * those are refreshed by the monthly budget, SCRUM-137).
    * The live listener below puts it on screen right away.
    * Returns true when it worked and false when it didn't.
    */
   const setBudgetLimit = useCallback(
-    async (categoryId, limit) => {
+    async (categoryId, limit, source = "user") => {
       if (!uid) return false;
       try {
         const ref = doc(db, "users", uid, "budgets", categoryId);
@@ -197,7 +208,7 @@ export default function FinanceProvider({ children }) {
           await updateDoc(ref, { deletedAt: null, deletedBy: null, purgeAfter: null, updatedAt: serverTimestamp() });
           deletedBudgetIds.current.delete(categoryId);
         }
-        await setDoc(ref, { categoryId, limit, updatedAt: serverTimestamp() });
+        await setDoc(ref, { categoryId, limit, source, updatedAt: serverTimestamp() });
         return true;
       } catch (err) {
         console.error("Could not save budget:", err.code, err.message);
@@ -275,6 +286,7 @@ export default function FinanceProvider({ children }) {
             categoryId: d.data().categoryId ?? d.id,
             month: CURRENT_MONTH,
             limit: Number(d.data().limit) || 0,
+            source: d.data().source ?? "user",
           }))
         );
       },
@@ -327,6 +339,45 @@ export default function FinanceProvider({ children }) {
   );
 
   const budgets = useMemo(() => serverBudgets ?? [], [serverBudgets]);
+
+  // Live records of the months whose budget was set (SCRUM-137). Stored with the uid they
+  // belong to, so after a sign-in change the old user's list reads as "still loading".
+  useEffect(() => {
+    if (!uid) return undefined;
+    return onSnapshot(
+      collection(db, "users", uid, "budgetMonths"),
+      (snap) =>
+        setMonthMarkerState({
+          uid,
+          list: snap.docs.map((d) => ({ month: d.id, auto: d.data().auto === true, savings: Number(d.data().savings) || 0 })),
+        }),
+      (err) => {
+        console.error("Could not load budget months:", err.code, err.message);
+        setMonthMarkerState({ uid, list: [] });
+      }
+    );
+  }, [uid]);
+
+  /**
+   * Remembers the savings kept when the user applied Auto budget for a month, so next
+   * month's budget keeps the same amount (SCRUM-137). Also marks that month as set.
+   */
+  const saveMonthSavings = useCallback(
+    async (month, savings) => {
+      if (!uid) return;
+      const ref = doc(db, "users", uid, "budgetMonths", month);
+      try {
+        if (monthMarkers?.some((m) => m.month === month)) {
+          await updateDoc(ref, { savings, updatedAt: serverTimestamp() });
+        } else {
+          await setDoc(ref, { month, auto: false, savings, createdAt: serverTimestamp() });
+        }
+      } catch (err) {
+        console.error("Could not save the month's savings:", err.code, err.message);
+      }
+    },
+    [uid, monthMarkers]
+  );
   const deletedBudgets = serverDeletedBudgets;
   const budgetsLoading = Boolean(uid) && serverBudgets === null;
 
@@ -413,6 +464,54 @@ export default function FinanceProvider({ children }) {
 
   // What the pages show: transactions that haven't been deleted
   const transactions = useMemo(() => (serverTransactions ?? []).filter((t) => !t.deletedAt), [serverTransactions]);
+
+  /**
+   * The budget sets itself at the start of each month (SCRUM-137). The first time the app
+   * opens in a month that has no budget record yet, Auto budget runs on the recent spending
+   * (planMonthlyBudget): it fills in categories with no budget and refreshes the ones it set
+   * before, keeps last month's savings, and never touches a limit the user typed in or a
+   * budget they removed. No scheduled job: it happens on the first visit.
+   * The month's record is written first. Only one tab (or device) can create it (the rules
+   * refuse a second one), so the budget is never set twice.
+   */
+  const autoBudgetKey = useRef(null); // what was last tried, so it doesn't retry on every render
+  useEffect(() => {
+    if (!uid || serverBudgets === null || serverTransactions === null || monthMarkers === null) return;
+    if (monthMarkers.some((m) => m.month === CURRENT_MONTH)) return; // already set this month
+    const key = `${uid}:${CURRENT_MONTH}:${transactions.length}`;
+    if (autoBudgetKey.current === key) return;
+    autoBudgetKey.current = key;
+
+    const { writes, suggestion } = planMonthlyBudget({
+      transactions,
+      month: CURRENT_MONTH,
+      categories,
+      budgets: serverBudgets,
+      deletedCategoryIds: [...deletedBudgetIds.current],
+      monthlyIncome: profile.monthlyIncome,
+      savings: carriedOverSavings(monthMarkers, CURRENT_MONTH),
+    });
+    if (writes.length === 0) return; // nothing to learn from yet; try again when data arrives
+
+    (async () => {
+      try {
+        await setDoc(doc(db, "users", uid, "budgetMonths", CURRENT_MONTH), {
+          month: CURRENT_MONTH,
+          auto: true,
+          savings: suggestion.savings,
+          createdAt: serverTimestamp(),
+        });
+      } catch (err) {
+        // Usually another tab got there first; either way, don't set it twice
+        console.warn("Monthly budget already being set:", err.code);
+        return;
+      }
+      for (const w of writes) await setBudgetLimit(w.categoryId, w.limit, "auto");
+    })();
+  }, [uid, serverBudgets, serverTransactions, monthMarkers, transactions, categories, profile.monthlyIncome, setBudgetLimit]);
+
+  // The current month's record when the budget set itself, for the dashboard banner
+  const autoBudgetMonth = monthMarkers?.find((m) => m.month === CURRENT_MONTH && m.auto) ?? null;
   // Soft-deleted manual transactions, newest deletion first (the Import page's "Recently deleted").
   // Imported ones are never soft deleted from the app; the server removes them with their statement.
   const deletedTransactions = useMemo(
@@ -662,6 +761,7 @@ export default function FinanceProvider({ children }) {
       budgets,
       budgetsLoading,
       deletedBudgets,
+      autoBudgetMonth,
       deletedStatements,
       statements,
       statementsLoading,
@@ -676,6 +776,7 @@ export default function FinanceProvider({ children }) {
       setBudgetLimit,
       removeBudget,
       restoreBudget,
+      saveMonthSavings,
       addCategory,
       addStatement,
       updateStatement,
@@ -693,6 +794,7 @@ export default function FinanceProvider({ children }) {
       budgets,
       budgetsLoading,
       deletedBudgets,
+      autoBudgetMonth,
       deletedStatements,
       statements,
       statementsLoading,
@@ -707,6 +809,7 @@ export default function FinanceProvider({ children }) {
       setBudgetLimit,
       removeBudget,
       restoreBudget,
+      saveMonthSavings,
       addCategory,
       addStatement,
       updateStatement,

@@ -370,7 +370,7 @@ function BudgetRow({ row, editing, onEdit, onSave, onCancel, onRemove }) {
  * that don't have a budget yet. Only one limit can be edited at a time.
  */
 export default function BudgetPage() {
-  const { budgets, budgetsLoading, transactionsLoading, transactions, categories, currentMonth, profile, setBudgetLimit, removeBudget, restoreBudget, addCategory } =
+  const { budgets, budgetsLoading, transactionsLoading, transactions, categories, currentMonth, profile, setBudgetLimit, removeBudget, restoreBudget, saveMonthSavings, addCategory } =
     useFinance();
   const { showToast } = useToast();
   // Which editor is open: an existing budget's categoryId, "new:<categoryId>"
@@ -467,10 +467,13 @@ export default function BudgetPage() {
   };
 
   // Saves every suggested limit (existing ones are updated, the rest created) and
-  // removes budgets the suggestion doesn't cover, so the total matches the preview
+  // removes budgets the suggestion doesn't cover, so the total matches the preview.
+  // The limits are marked as Auto budget's, so next month's budget can refresh them, and the
+  // savings are remembered so next month keeps the same amount (SCRUM-137).
   const applyAutoBudget = async () => {
+    saveMonthSavings(month, suggestion.savings);
     const results = await Promise.all([
-      ...suggestion.rows.map((r) => setBudgetLimit(r.categoryId, r.limit)),
+      ...suggestion.rows.map((r) => setBudgetLimit(r.categoryId, r.limit, "auto")),
       ...[...removing].map((id) => removeBudget(id)),
     ]);
     showToast(
