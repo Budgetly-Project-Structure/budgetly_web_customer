@@ -59,12 +59,32 @@ function SummaryTile({ label, value, sub, subTone = "muted" }) {
   );
 }
 
+// Remembers in this browser that the "we set your budget" banner was closed for a month
+const bannerKey = (month) => `budgetly.autoBudgetBanner.${month}`;
+function bannerClosed(month) {
+  try {
+    return localStorage.getItem(bannerKey(month)) === "closed";
+  } catch {
+    return false;
+  }
+}
+
 /** Dashboard page component. */
 export default function HomePage() {
-  const { transactions, transactionsLoading, transactionsError, budgets, budgetsLoading, categories, currentMonth, profile } =
+  const { transactions, transactionsLoading, transactionsError, budgets, budgetsLoading, categories, currentMonth, profile, autoBudgetMonth } =
     useFinance();
   // Month picked with the arrows; null = not picked yet, so use the default below
   const [pickedMonth, setPickedMonth] = useState(null);
+  // The budget set itself this month (SCRUM-137): show the banner until it's closed
+  const [bannerHidden, setBannerHidden] = useState(() => bannerClosed(currentMonth));
+  const closeBanner = () => {
+    setBannerHidden(true);
+    try {
+      localStorage.setItem(bannerKey(currentMonth), "closed");
+    } catch {
+      // Private mode or storage blocked: it just comes back next visit
+    }
+  };
 
   // Waiting for the first snapshot from Firestore: don't flash "no data yet"
   if (transactionsLoading || budgetsLoading) {
@@ -145,6 +165,22 @@ export default function HomePage() {
 
   return (
     <div className="space-y-8">
+      {/* The budget set itself at the start of the month (SCRUM-137) */}
+      {autoBudgetMonth && !bannerHidden && (
+        <div role="status" className="flex flex-wrap items-center gap-3 bg-greenDim/40 border border-green/40 rounded-lg px-4 py-3">
+          <Icon name="check" className="w-4 h-4 text-green shrink-0" />
+          <p className="flex-1 min-w-[12rem] text-sm text-textLight">
+            We set your {formatMonth(currentMonth).split(" ")[0]} budget from your recent spending.
+          </p>
+          <Link to="/budget" className={buttonStyles.secondary}>
+            Adjust
+          </Link>
+          <button type="button" onClick={closeBanner} className={buttonStyles.ghost} aria-label="Close this message">
+            <Icon name="close" className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Headline */}
       <div>
         <div className="flex items-center gap-2 text-sm text-textMuted mb-1">
