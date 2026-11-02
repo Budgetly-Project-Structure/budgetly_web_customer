@@ -7,10 +7,11 @@
  * What it provides:
  *   Data:    categories, accounts, currentMonth, previousMonth,
  *            transactions, budgets, statements (import history), profile, lastImport
- *   Deleted: deletedTransactions, deletedBudgets (soft deleted, still restorable; SCRUM-125)
+ *   Deleted: deletedTransactions, deletedBudgets (soft deleted, still restorable; SCRUM-125),
+ *            deletedStatements (SCRUM-121)
  *   Actions: updateTransactionCategory, addTransaction, updateTransaction, deleteTransaction, restoreTransaction,
  *            setBudgetLimit, removeBudget, restoreBudget, addCategory,
- *            addStatement, updateStatement, removeStatement, deleteStatement, saveProfile
+ *            addStatement, updateStatement, removeStatement, deleteStatement, restoreStatement, saveProfile
  *
  * Transactions, import history and budgets are live from Firestore (onSnapshot).
  * Transactions are one top-level collection, transactions/{id}, for every user; the owner is
@@ -619,6 +620,30 @@ export default function FinanceProvider({ children }) {
 
   const statementsLoading = Boolean(uid) && serverImports === null;
 
+  // Deleted statements, newest deletion first (the Import page's "Recently deleted", SCRUM-121)
+  const deletedStatements = useMemo(
+    () => (serverImports ?? []).filter((s) => s.deletedAt).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
+    [serverImports]
+  );
+
+  /**
+   * Brings back a deleted statement and its transactions (SCRUM-121). The
+   * restoreImport Cloud Function clears the delete fields; the live listeners then
+   * put the row and the transactions back on every page.
+   * Throws an Error with a message that can be shown to the user.
+   */
+  const restoreStatement = useCallback(async (id) => {
+    try {
+      const { data } = await httpsCallable(functions, "restoreImport")({ importId: id });
+      return data; // { restoredTransactions }
+    } catch (err) {
+      console.error("Could not restore import:", err.code, err.message);
+      // The function's own errors (too late, not deleted...) have readable messages
+      const readable = ["functions/not-found", "functions/failed-precondition", "functions/permission-denied", "functions/unauthenticated"];
+      throw new Error(readable.includes(err.code) ? err.message : "We couldn't restore this statement. Please try again.");
+    }
+  }, []);
+
   const lastImport = statements.find((s) => s.status === "completed");
 
   const value = useMemo(
@@ -634,6 +659,7 @@ export default function FinanceProvider({ children }) {
       budgets,
       budgetsLoading,
       deletedBudgets,
+      deletedStatements,
       statements,
       statementsLoading,
       statementsError,
@@ -652,6 +678,7 @@ export default function FinanceProvider({ children }) {
       updateStatement,
       removeStatement,
       deleteStatement,
+      restoreStatement,
       saveProfile,
     }),
     [
@@ -663,6 +690,7 @@ export default function FinanceProvider({ children }) {
       budgets,
       budgetsLoading,
       deletedBudgets,
+      deletedStatements,
       statements,
       statementsLoading,
       statementsError,
@@ -681,6 +709,7 @@ export default function FinanceProvider({ children }) {
       updateStatement,
       removeStatement,
       deleteStatement,
+      restoreStatement,
       saveProfile,
     ]
   );
