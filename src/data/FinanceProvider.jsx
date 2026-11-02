@@ -66,6 +66,9 @@ function statementFromDoc(d) {
     fileName: (x.fileName ?? "Statement").replace(/^\d{13}_/, ""),
     fileType: x.fileType ?? "csv",
     accountId: x.accountId ?? null,
+    // Checking or credit card, as the import read it, and what it detected from the file (SCRUM-135)
+    accountType: x.accountType ?? null,
+    detectedAccountType: x.detectedAccountType ?? null,
     status: x.status ?? "uploaded", // uploaded → processing → completed | failed
     transactionCount: x.transactionCount ?? 0,
     skippedRowCount: x.skippedRowCount ?? 0, // rows the parser couldn't read

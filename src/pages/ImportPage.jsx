@@ -44,6 +44,10 @@ import { formatAmount, formatCurrency, formatDate, formatDateTime, maskAccount }
 import { validateStatementFile } from "../lib/importValidation";
 import { uploadStatement } from "../lib/uploads";
 
+// The account picker's default: let the import tell checking from credit card by
+// reading the file (SCRUM-135). Picking an account instead always wins.
+const AUTO_DETECT = "auto";
+
 /**
  * How each import status looks in the history list.
  * Every status has a label and an icon, not just a color, so it stays
@@ -275,8 +279,9 @@ export default function ImportPage() {
     deleteStatement,
   } = useFinance();
 
-  // Which bank account the next upload is for. Defaults to the first account.
-  const [accountId, setAccountId] = useState(accounts[0].id);
+  // Which bank account the next upload is for. "auto" (the default) lets the import
+  // work out checking vs credit card from the file itself (SCRUM-135).
+  const [accountId, setAccountId] = useState(AUTO_DETECT);
 
   // True while a file is being dragged over the drop zone (highlights it).
   const [dragging, setDragging] = useState(false);
@@ -325,11 +330,13 @@ export default function ImportPage() {
     // Temporary local id for this history row (not the Firestore doc id)
     const id = `stmt-${crypto.randomUUID()}`;
 
+    // null = not picked: the import detects it and fills it in
+    const pickedId = accountId === AUTO_DETECT ? null : accountId;
     addStatement({
       id,
       fileName: file.name,
       fileType: file.name.split(".").pop().toLowerCase(),
-      accountId,
+      accountId: pickedId,
       uploadedAt: new Date().toISOString(),
       status: "uploading",
       transactionCount: 0,
@@ -338,8 +345,8 @@ export default function ImportPage() {
 
     try {
       const storagePath = await uploadStatement(file, {
-        accountId,
-        accountType: accounts.find((a) => a.id === accountId)?.type,
+        accountId: pickedId,
+        accountType: accounts.find((a) => a.id === pickedId)?.type,
         onProgress: (pct) => setProgress((p) => ({ ...p, [id]: pct })),
       });
       updateStatement(id, { status: "uploaded", storagePath });
@@ -385,6 +392,7 @@ export default function ImportPage() {
           <label className="flex flex-col sm:flex-row sm:items-center gap-2 text-sm">
             <span className="text-textMuted">Which account is this statement for?</span>
             <select value={accountId} onChange={(e) => setAccountId(e.target.value)} className={inputStyles}>
+              <option value={AUTO_DETECT}>Detect from the file</option>
               {accounts.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.name} {maskAccount(a.last4)}
@@ -477,10 +485,18 @@ export default function ImportPage() {
             {statements.map((s) => {
               const st = STATUS[s.status] ?? STATUS.uploaded;
               const acct = acctById(s.accountId);
+              // What the import detected from the file (SCRUM-135): "(detected)" when that's the
+              // account it was filed under, a hint when the account picked doesn't match
+              const detected = s.detectedAccountType;
+              const detectedNote = !detected || !acct
+                ? ""
+                : detected === acct.type
+                  ? " (detected)"
+                  : ` (looks like a ${detected === "credit" ? "credit card" : "checking"} statement)`;
               // Imports made outside the app may have no account: just leave it out
               const details = [
                 s.fileType.toUpperCase() + (s.size ? ` · ${formatBytes(s.size)}` : ""),
-                acct && `${acct.name} ${maskAccount(acct.last4)}`,
+                acct && `${acct.name} ${maskAccount(acct.last4)}${detectedNote}`,
                 formatDateTime(s.uploadedAt),
               ].filter(Boolean);
               return (
