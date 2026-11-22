@@ -38,6 +38,7 @@ import {
   addDoc,
   collection,
   doc,
+  getCountFromServer,
   onSnapshot,
   orderBy,
   query,
@@ -50,6 +51,7 @@ import { httpsCallable } from "firebase/functions";
 import { auth, db, functions } from "../lib/firebase";
 import { FinanceContext } from "./FinanceContext";
 import { cleanMerchant } from "../lib/merchantName";
+import { displayFileName, fileTypeFromPath } from "../lib/importFile";
 import { carriedOverSavings, planMonthlyBudget } from "../lib/finance";
 import {
   ACCOUNTS,
@@ -63,20 +65,22 @@ import {
  * Turns a Firestore import doc (users/{uid}/imports/{id}, written by the
  * onStatementUploaded Cloud Function) into the "statement" shape the UI uses.
  * Fields the server hasn't set yet get safe defaults.
+ * The record doesn't copy anything it can get elsewhere (Sprint 5 #2): the file name and
+ * type come from storagePath, the account type from the account, and the number of
+ * transactions is counted from the transactions collection (transactionCount is added
+ * later, see importCounts below).
  */
 function statementFromDoc(d) {
   const x = d.data();
   return {
     id: d.id,
     // Uploads are stored as "{timestamp}_{name}" so repeats don't collide; show just the name
-    fileName: (x.fileName ?? "Statement").replace(/^\d{13}_/, ""),
-    fileType: x.fileType ?? "csv",
+    fileName: displayFileName(x.storagePath),
+    fileType: fileTypeFromPath(x.storagePath),
     accountId: x.accountId ?? null,
-    // Checking or credit card, as the import read it, and what it detected from the file (SCRUM-135)
-    accountType: x.accountType ?? null,
+    // What the import detected from the file (SCRUM-135)
     detectedAccountType: x.detectedAccountType ?? null,
     status: x.status ?? "uploaded", // uploaded → processing → completed | failed
-    transactionCount: x.transactionCount ?? 0,
     skippedRowCount: x.skippedRowCount ?? 0, // rows the parser couldn't read
     duplicateRowCount: x.duplicateRowCount ?? 0, // rows an earlier statement already saved (SCRUM-136)
     rowErrors: x.rowErrors ?? [], // [{ row, reason }]
@@ -179,6 +183,9 @@ export default function FinanceProvider({ children }) {
   const [pendingUploads, setPendingUploads] = useState([]);
   const [serverImports, setServerImports] = useState(null); // null = still loading
   const [statementsError, setStatementsError] = useState(null);
+  // How many transactions each finished import saved: importId -> count, counted from the
+  // transactions collection (the import record doesn't store it, Sprint 5 #2)
+  const [importCounts, setImportCounts] = useState({ uid: null, counts: {} });
   const [dismissedIds, setDismissedIds] = useState(() => new Set());
   const [uid, setUid] = useState(null);
   const [profile, setProfile] = useState(PROFILE);
@@ -711,21 +718,68 @@ export default function FinanceProvider({ children }) {
     }
   }, []);
 
+  // Count each finished import's transactions once, with a count() query on the transactions
+  // collection (one small read per import, not the transactions themselves). Imported
+  // transactions can't be added to or removed one by one, so a finished import's count never
+  // changes; deleting a statement only marks its transactions, so the count still holds.
+  useEffect(() => {
+    if (!uid || !serverImports) return;
+    const known = importCounts.uid === uid ? importCounts.counts : {};
+    const missing = serverImports.filter((s) => s.status === "completed" && !(s.id in known));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const found = {};
+      await Promise.all(
+        missing.map(async (s) => {
+          try {
+            const snap = await getCountFromServer(
+              // The rules need the userId filter on every transactions query
+              query(collection(db, "transactions"), where("userId", "==", uid), where("sourceStatementId", "==", s.id))
+            );
+            found[s.id] = snap.data().count;
+          } catch (err) {
+            console.error("Could not count an import's transactions:", err.code, err.message);
+          }
+        })
+      );
+      if (cancelled || Object.keys(found).length === 0) return;
+      setImportCounts((prev) => ({ uid, counts: { ...(prev.uid === uid ? prev.counts : {}), ...found } }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [uid, serverImports, importCounts]);
+
+  // A server import with its count: a number once counted, 0 for an import that didn't
+  // finish, null while it's still being counted
+  const withCount = useCallback(
+    (s) => {
+      const counts = importCounts.uid === uid ? importCounts.counts : {};
+      return { ...s, transactionCount: s.status === "completed" ? (counts[s.id] ?? null) : 0 };
+    },
+    [importCounts, uid]
+  );
+
   const statements = useMemo(() => {
     const serverPaths = new Set((serverImports ?? []).map((s) => s.storagePath));
     // Hide a pending row once the server has its own doc for the same file
     const pending = pendingUploads.filter((p) => !p.storagePath || !serverPaths.has(p.storagePath));
     // Deleted statements are hidden (their transactions are too, since they carry deletedAt)
-    const server = (serverImports ?? []).filter((s) => !dismissedIds.has(s.id) && !s.deletedAt);
+    const server = (serverImports ?? []).filter((s) => !dismissedIds.has(s.id) && !s.deletedAt).map(withCount);
     return [...pending, ...server];
-  }, [pendingUploads, serverImports, dismissedIds]);
+  }, [pendingUploads, serverImports, dismissedIds, withCount]);
 
   const statementsLoading = Boolean(uid) && serverImports === null;
 
   // Deleted statements, newest deletion first (the Import page's "Recently deleted", SCRUM-121)
   const deletedStatements = useMemo(
-    () => (serverImports ?? []).filter((s) => s.deletedAt).sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
-    [serverImports]
+    () =>
+      (serverImports ?? [])
+        .filter((s) => s.deletedAt)
+        .map(withCount)
+        .sort((a, b) => b.deletedAt.localeCompare(a.deletedAt)),
+    [serverImports, withCount]
   );
 
   /**

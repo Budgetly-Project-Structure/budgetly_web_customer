@@ -123,6 +123,15 @@ function ConfirmDelete({ statement, deleting, error, onConfirm, onCancel }) {
   );
 }
 
+/**
+ * "36 transactions", or "… transactions" while the count is still loading
+ * (it's counted from the transactions collection, not stored on the import; Sprint 5 #2).
+ */
+function transactionsLabel(n) {
+  if (n == null) return "… transactions";
+  return `${n} ${n === 1 ? "transaction" : "transactions"}`;
+}
+
 /** Whole days until the server may remove a soft-deleted item for good (null if unknown). */
 function daysLeft(purgeAfter) {
   if (!purgeAfter) return null;
@@ -191,7 +200,7 @@ function RecentlyDeleted({ statements, transactions, budgets, categories, onRest
                 <p className="text-sm text-textLight break-words">
                   {s.fileName}{" "}
                   <span className="text-textMuted">
-                    · {s.transactionCount} {s.transactionCount === 1 ? "transaction" : "transactions"}
+                    · {transactionsLabel(s.transactionCount)}
                   </span>
                 </p>
                 <p className="text-xs text-textMuted">Statement · {purgeNote(s.purgeAfter)}</p>
@@ -512,7 +521,7 @@ export default function ImportPage() {
                     </div>
                     {s.status === "completed" && (
                       <span className="text-xs text-textMuted">
-                        {s.transactionCount} {s.transactionCount === 1 ? "transaction" : "transactions"}
+                        {transactionsLabel(s.transactionCount)}
                         {s.skippedRowCount > 0 ? ` imported, ${s.skippedRowCount} skipped` : ""}
                         {s.duplicateRowCount > 0
                           ? `${s.skippedRowCount > 0 ? "," : " imported,"} ${s.duplicateRowCount} already imported`
