@@ -13,7 +13,7 @@
  * @param {Object}   [props.initial]   A transaction to edit. Leave out to add a new one.
  * @param {Object[]} props.categories  Options for the category dropdown
  * @param {Object[]} props.accounts    Options for the account dropdown
- * @param {(values: {date: string, merchant: string, amount: number, category: string, accountId: string|null}) => Promise<void>} props.onSave
+ * @param {(values: {date: string, merchant: string, amountCents: number, category: string, accountId: string|null}) => Promise<void>} props.onSave
  *        Saves it. Should throw an Error with a readable message if it fails.
  * @param {() => void} props.onCancel  Closes the form without saving
  * @param {boolean}  [props.inline]    True when the form opens inside the list, in place of the row
@@ -21,6 +21,13 @@
  */
 import { useState } from "react";
 import { Card, buttonStyles, inputStyles } from "./ui";
+import { parseCents, txnCents } from "../lib/money";
+
+/** The amount field's starting text when editing: 1240 cents -> "12.40". */
+function centsText(txn) {
+  const c = Math.abs(txnCents(txn));
+  return `${Math.floor(c / 100)}.${String(c % 100).padStart(2, "0")}`;
+}
 
 /** Today as "YYYY-MM-DD" in the user's own time zone (toISOString would use UTC). */
 function today() {
@@ -32,8 +39,8 @@ export default function ManualTransactionForm({ initial, categories, accounts, o
   const editing = Boolean(initial);
   const [date, setDate] = useState(initial?.date ?? today());
   const [merchant, setMerchant] = useState(initial?.merchant ?? "");
-  const [amount, setAmount] = useState(initial ? String(Math.abs(initial.amount)) : "");
-  const [type, setType] = useState(initial && initial.amount > 0 ? "income" : "spending");
+  const [amount, setAmount] = useState(initial ? centsText(initial) : "");
+  const [type, setType] = useState(initial && (initial.amountCents ?? initial.amount) > 0 ? "income" : "spending");
   const [category, setCategory] = useState(initial?.category ?? "uncategorized");
   const [accountId, setAccountId] = useState(initial?.accountId ?? "");
   const [error, setError] = useState(null);
@@ -41,18 +48,18 @@ export default function ManualTransactionForm({ initial, categories, accounts, o
 
   const submit = async (e) => {
     e.preventDefault();
-    const dollars = Math.round(Number(amount) * 100) / 100;
+    const cents = parseCents(amount); // typed text -> whole cents, no floating point
     // Check everything and say what's wrong, rather than silently doing nothing
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setError("Pick a date.");
     if (!merchant.trim()) return setError("Enter a merchant or description.");
-    if (!Number.isFinite(dollars) || dollars <= 0) return setError("Enter an amount greater than $0.");
+    if (!Number.isFinite(cents) || cents <= 0) return setError("Enter an amount greater than $0, with at most 2 decimals.");
     setError(null);
     setSaving(true);
     try {
       await onSave({
         date,
         merchant: merchant.trim().slice(0, 100),
-        amount: type === "spending" ? -dollars : dollars,
+        amountCents: type === "spending" ? -cents : cents,
         category,
         accountId: accountId || null,
       });

@@ -31,6 +31,7 @@ import { useFinance } from "../data/FinanceContext";
 import { useToast } from "../components/ToastContext";
 import { isTransfer, needsReview } from "../lib/finance";
 import { formatAmount, formatDate, formatMonth, maskAccount } from "../lib/format";
+import { txnCents } from "../lib/money";
 
 /**
  * The category dropdown shown on each transaction. Correcting a category is one
@@ -235,7 +236,7 @@ export default function TransactionsPage() {
   // moving money between your own accounts) are left out, the same as on the dashboard,
   // unless you're looking at the Transfer category on purpose.
   const skipTransfers = category !== "transfers";
-  const net = filtered.reduce((s, t) => (skipTransfers && isTransfer(t) ? s : s + t.amount), 0);
+  const net = filtered.reduce((s, t) => (skipTransfers && isTransfer(t) ? s : s + txnCents(t)), 0) / 100;
   const transfersLeftOut = skipTransfers && filtered.some(isTransfer);
   // Count for the "Needs review (N)" button, for the selected month regardless of other filters
   const reviewTotal = transactions.filter((t) => (month === "all" || t.date.startsWith(month)) && needsReview(t)).length;

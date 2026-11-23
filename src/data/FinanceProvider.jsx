@@ -20,7 +20,8 @@
  * (SCRUM-117). Deleting a manual transaction or a budget is a soft delete: deletedAt, deletedBy and
  * purgeAfter are set and the server removes it for good later. The pages only see active items; the
  * soft-deleted ones are listed separately (deletedTransactions, deletedBudgets) so they can be restored.
- * Budgets are users/{uid}/budgets/{categoryId} = { categoryId, limit, source, updatedAt }.
+ * Budgets are users/{uid}/budgets/{categoryId} = { categoryId, limitCents, source, updatedAt }.
+ * limitCents is whole cents (SCRUM-148); the pages work in dollars, converted in lib/money.js.
  * A limit is monthly, so it applies to every month; a new user has none. source is "auto"
  * when Auto budget set it and "user" when the user typed it in (older budgets have none = "user").
  * Each month the budget sets itself once (SCRUM-137, planMonthlyBudget in lib/finance.js):
@@ -37,6 +38,7 @@ import {
   Timestamp,
   addDoc,
   collection,
+  deleteField,
   doc,
   getCountFromServer,
   onSnapshot,
@@ -53,6 +55,7 @@ import { FinanceContext } from "./FinanceContext";
 import { cleanMerchant } from "../lib/merchantName";
 import { displayFileName, fileTypeFromPath } from "../lib/importFile";
 import { carriedOverSavings, planMonthlyBudget } from "../lib/finance";
+import { budgetLimitDollars, centsToDollars, dollarsToCents, txnCents } from "../lib/money";
 import {
   ACCOUNTS,
   CATEGORIES,
@@ -114,7 +117,10 @@ function transactionFromDoc(d) {
     // Manual ones are shown exactly as the user typed them. The raw text stays in Firestore.
     merchant: x.source === "manual" ? (x.merchant ?? "") : cleanMerchant(x.merchant),
     rawMerchant: x.merchant ?? "",
-    amount: x.amount ?? 0,
+    // Money is whole cents (SCRUM-150). `amount` is the same value in dollars, for the pages
+    // that still show dollars; add up amountCents, never amount.
+    amountCents: txnCents(x),
+    amount: centsToDollars(txnCents(x)),
     category: x.category ?? "uncategorized",
     categoryConfidence: x.categoryConfidence ?? (corrected ? 1 : 0),
     isUserCorrected: corrected,
@@ -198,7 +204,8 @@ export default function FinanceProvider({ children }) {
   const deletedBudgetIds = useRef(new Set());
 
   /**
-   * Sets the monthly limit for a category: creates the budget or changes it.
+   * Sets the monthly limit (in dollars) for a category: creates the budget or changes it.
+   * It is saved as whole cents (limitCents, SCRUM-148).
    * source is "user" for a limit typed in, "auto" for one Auto budget chose (only
    * those are refreshed by the monthly budget, SCRUM-137).
    * The live listener below puts it on screen right away.
@@ -207,6 +214,8 @@ export default function FinanceProvider({ children }) {
   const setBudgetLimit = useCallback(
     async (categoryId, limit, source = "user") => {
       if (!uid) return false;
+      const limitCents = dollarsToCents(limit);
+      if (!Number.isInteger(limitCents) || limitCents < 0) return false; // not a usable amount
       try {
         const ref = doc(db, "users", uid, "budgets", categoryId);
         // A removed budget is only soft deleted, and the rules won't let a new limit
@@ -215,7 +224,7 @@ export default function FinanceProvider({ children }) {
           await updateDoc(ref, { deletedAt: null, deletedBy: null, purgeAfter: null, updatedAt: serverTimestamp() });
           deletedBudgetIds.current.delete(categoryId);
         }
-        await setDoc(ref, { categoryId, limit, source, updatedAt: serverTimestamp() });
+        await setDoc(ref, { categoryId, limitCents, source, updatedAt: serverTimestamp() });
         return true;
       } catch (err) {
         console.error("Could not save budget:", err.code, err.message);
@@ -280,7 +289,7 @@ export default function FinanceProvider({ children }) {
           deleted
             .map((d) => ({
               categoryId: d.data().categoryId ?? d.id,
-              limit: Number(d.data().limit) || 0,
+              limit: budgetLimitDollars(d.data()),
               deletedAt: d.data().deletedAt.toDate().toISOString(),
               purgeAfter: d.data().purgeAfter?.toDate?.().toISOString() ?? null,
             }))
@@ -292,7 +301,7 @@ export default function FinanceProvider({ children }) {
             userId: uid,
             categoryId: d.data().categoryId ?? d.id,
             month: CURRENT_MONTH,
-            limit: Number(d.data().limit) || 0,
+            limit: budgetLimitDollars(d.data()),
             source: d.data().source ?? "user",
           }))
         );
@@ -554,17 +563,18 @@ export default function FinanceProvider({ children }) {
   // Manual transactions (SCRUM-86): the user's own entries, marked source "manual". The
   // Firestore rules only let the browser create/edit/soft-delete these, never imported ones.
   // Each throws an Error with a message that can be shown on the form.
-  /** Adds a transaction typed in by the user. `date` is "YYYY-MM-DD"; amount < 0 = spending. */
+  /** Adds a transaction typed in by the user. `date` is "YYYY-MM-DD"; amountCents < 0 = spending. */
   const addTransaction = useCallback(
-    async ({ date, merchant, amount, category, accountId }) => {
+    async ({ date, merchant, amountCents, category, accountId }) => {
       if (!uid) throw new Error("You need to be logged in.");
+      if (!Number.isInteger(amountCents) || amountCents === 0) throw new Error("Enter an amount greater than $0.");
       try {
         await addDoc(collection(db, "transactions"), {
           userId: uid, // the owner; the rules only accept your own uid here
           // Noon UTC, same as imported transactions, so the day never shifts with time zones
           date: Timestamp.fromDate(new Date(`${date}T12:00:00Z`)),
           merchant,
-          amount,
+          amountCents,
           category,
           categorySource: "user",
           categoryConfidence: 1,
@@ -588,13 +598,15 @@ export default function FinanceProvider({ children }) {
 
   /** Changes a manual transaction. Same fields as addTransaction. */
   const updateTransaction = useCallback(
-    async (id, { date, merchant, amount, category, accountId }) => {
+    async (id, { date, merchant, amountCents, category, accountId }) => {
       if (!uid) throw new Error("You need to be logged in.");
+      if (!Number.isInteger(amountCents) || amountCents === 0) throw new Error("Enter an amount greater than $0.");
       try {
         await updateDoc(doc(db, "transactions", id), {
           date: Timestamp.fromDate(new Date(`${date}T12:00:00Z`)),
           merchant,
-          amount,
+          amountCents,
+          amount: deleteField(), // an older transaction may still have the dollar field; cents replace it
           category,
           accountId: accountId ?? null,
           updatedAt: serverTimestamp(),
