@@ -21,7 +21,8 @@
  *
  * Recently deleted (SCRUM-125): statements (SCRUM-121), manual transactions and budgets the user deleted stay
  * recoverable for 30 days (a soft delete). This section lists them with a Restore button,
- * and shows how many days are left before the server removes them for good.
+ * and shows how many days are left to restore them. After that the server moves them to
+ * an archive only admins can reach (Sprint 5 #12), so they leave the app.
  *
  * Import history is live: FinanceProvider listens to users/{uid}/imports in
  * Firestore, so status changes (processing, completed, failed) appear here
@@ -132,18 +133,18 @@ function transactionsLabel(n) {
   return `${n} ${n === 1 ? "transaction" : "transactions"}`;
 }
 
-/** Whole days until the server may remove a soft-deleted item for good (null if unknown). */
+/** Whole days until the server may move a soft-deleted item to the archive (null if unknown). */
 function daysLeft(purgeAfter) {
   if (!purgeAfter) return null;
   return Math.max(0, Math.ceil((new Date(purgeAfter).getTime() - Date.now()) / (24 * 60 * 60 * 1000)));
 }
 
-/** "Removed for good in 29 days" */
+/** "Can be restored for 29 more days" (after that it's archived and leaves the app, Sprint 5 #12) */
 function purgeNote(purgeAfter) {
   const n = daysLeft(purgeAfter);
   if (n === null) return "";
-  if (n === 0) return "Removed for good today";
-  return `Removed for good in ${n} ${n === 1 ? "day" : "days"}`;
+  if (n === 0) return "Last day to restore";
+  return `Can be restored for ${n} more ${n === 1 ? "day" : "days"}`;
 }
 
 /**
