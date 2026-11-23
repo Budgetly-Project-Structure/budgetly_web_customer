@@ -7,6 +7,7 @@
 //   - month is a "YYYY-MM" string and txn.date is "YYYY-MM-DD", so a startsWith() check finds a month
 
 import { formatCurrency } from "./format";
+import { centsToDollars, txnCents } from "./money";
 
 /** True for a transfer between the user's own accounts (e.g. a credit card payment). */
 export function isTransfer(txn) {
@@ -69,23 +70,27 @@ export function budgetIncome(moneyIn, monthlyIncome) {
  * @returns {{income: number, spending: number, net: number}} spending is a positive number
  */
 export function monthTotals(transactions, month) {
+  // Added up in whole cents so the totals are exact, then shown as dollars (SCRUM-150)
   let income = 0;
   let spending = 0;
   for (const t of transactions) {
     if (!inMonth(t, month) || isTransfer(t)) continue;
-    if (t.amount > 0) income += t.amount;
-    else spending += -t.amount;
+    const c = txnCents(t);
+    if (c > 0) income += c;
+    else spending += -c;
   }
-  return { income, spending, net: income - spending };
+  return { income: centsToDollars(income), spending: centsToDollars(spending), net: centsToDollars(income - spending) };
 }
 
 /** { [categoryId]: totalSpent } for spending transactions in a month. */
 export function spendingByCategory(transactions, month) {
-  const out = {};
+  const cents = {};
   for (const t of transactions) {
-    if (!inMonth(t, month) || t.amount >= 0 || isTransfer(t)) continue;
-    out[t.category] = (out[t.category] || 0) + -t.amount;
+    if (!inMonth(t, month) || txnCents(t) >= 0 || isTransfer(t)) continue;
+    cents[t.category] = (cents[t.category] || 0) + -txnCents(t);
   }
+  const out = {};
+  for (const [id, c] of Object.entries(cents)) out[id] = centsToDollars(c);
   return out;
 }
 
@@ -339,7 +344,7 @@ export function generateInsights(transactions, month, prevMonth, categories, bud
   if (visits >= 3) {
     const total = transactions
       .filter((t) => inMonth(t, month) && t.merchant === topMerchant)
-      .reduce((s, t) => s + -t.amount, 0);
+      .reduce((s, t) => s + -txnCents(t), 0) / 100;
     insights.push({
       id: "merchant",
       tone: "neutral",
@@ -382,7 +387,7 @@ export function answerSpendingQuestion(question, transactions, month, categories
   );
   if (cat) {
     const list = monthTx.filter((t) => t.category === cat.id);
-    const total = list.reduce((s, t) => s + -t.amount, 0);
+    const total = list.reduce((s, t) => s + -txnCents(t), 0) / 100;
     return { total, count: list.length, subject: cat.label };
   }
 
@@ -391,7 +396,7 @@ export function answerSpendingQuestion(question, transactions, month, categories
     if (q.includes(word)) {
       const re = new RegExp(pattern, "i");
       const list = monthTx.filter((t) => re.test(t.merchant));
-      return { total: list.reduce((s, t) => s + -t.amount, 0), count: list.length, subject: word };
+      return { total: list.reduce((s, t) => s + -txnCents(t), 0) / 100, count: list.length, subject: word };
     }
   }
 
@@ -401,7 +406,7 @@ export function answerSpendingQuestion(question, transactions, month, categories
   if (merchant) {
     const key = merchant.toLowerCase().split(" ")[0];
     const list = monthTx.filter((t) => t.merchant.toLowerCase().startsWith(key));
-    return { total: list.reduce((s, t) => s + -t.amount, 0), count: list.length, subject: merchant };
+    return { total: list.reduce((s, t) => s + -txnCents(t), 0) / 100, count: list.length, subject: merchant };
   }
   return null;
 }
