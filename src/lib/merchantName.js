@@ -22,6 +22,12 @@ const BANK_PREFIX = /^(?:(?:pos|debit|credit|check\s?card|checkcard|purchase|rec
 const PROCESSOR = /^(?:sq|tst|pp|sp|paypal|doordash|dd|grubhub|uber\s?eats|ubereats|ue)$/i;
 // Words dropped from the END of a name ("Walmart Supercenter", "Chipotle Online", "Spotify USA")
 const TRAILING_NOISE = new Set(["utility", "online", "usa", "us", "store", "supercenter", "restaurant", "inc", "llc", "ltd", "co", "com", "net", "org", "purchase", "pos"]);
+// Two-letter state codes banks add at the end of a name: "STEAM PURCHASE WA", "SHELL OIL SPRINGFIELD MO" (SCRUM-168)
+const STATE_CODES = new Set(
+  "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY".split(" ")
+);
+// State codes that are also everyday words ("PAY ME", "TRANSFER TO ME"): dropped only after a city
+const WORD_STATE_CODES = new Set(["IN", "OR", "ME", "OK", "HI", "OH"]);
 // Web address endings: "NETFLIX.COM", "AMAZON.COM"
 const DOMAIN_ENDING = /\.(com|net|org|co|io|us)\b/gi;
 // Kept in capitals
@@ -96,8 +102,16 @@ export function cleanMerchant(raw) {
     .trim()
     .replace(/^[-./\s]+|[-./\s]+$/g, "");
 
-  // Drop noise words from the end, but never the whole name
   let words = text.split(" ").filter(Boolean);
+  // A state code at the end ("... WA", "... MO"): only when it is written in capitals, as banks do,
+  // and never when it would leave nothing. One that is also a word needs a city before it.
+  const lastWord = words[words.length - 1];
+  if (words.length > 1 && STATE_CODES.has(lastWord)) {
+    const before = words[words.length - 2].toLowerCase();
+    const looksLikeAWord = WORD_STATE_CODES.has(lastWord) && (words.length < 3 || SMALL_WORDS.has(before));
+    if (!looksLikeAWord) words.pop();
+  }
+  // Drop noise words from the end, but never the whole name
   while (words.length > 1 && TRAILING_NOISE.has(words[words.length - 1].toLowerCase())) words.pop();
   // "SHELL OIL" -> "Shell": the word "oil" after a name adds nothing
   if (words.length > 1 && words[words.length - 1].toLowerCase() === "oil") words.pop();
