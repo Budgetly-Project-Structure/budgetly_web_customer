@@ -5,7 +5,7 @@
  * route in <FinanceProvider>, and pages read from it with useFinance().
  *
  * What it provides:
- *   Data:    categories, accounts, currentMonth, previousMonth,
+ *   Data:    categories, accounts (the user's, SCRUM-167), userAccounts, deletedAccounts, accountById, currentMonth, previousMonth,
  *            transactions, budgets, statements (import history), profile, lastImport,
  *            autoBudgetMonth (the month the budget set itself, SCRUM-137)
  *   Deleted: deletedTransactions, deletedBudgets (soft deleted, still restorable; SCRUM-125),
@@ -56,6 +56,7 @@ import { cleanMerchant } from "../lib/merchantName";
 import { displayFileName, fileTypeFromPath } from "../lib/importFile";
 import { carriedOverSavings, planMonthlyBudget } from "../lib/finance";
 import { budgetLimitDollars, centsToDollars, dollarsToCents, txnCents } from "../lib/money";
+import { cleanAccountInput, toAccount } from "../lib/accounts";
 import {
   ACCOUNTS,
   CATEGORIES,
@@ -194,6 +195,8 @@ export default function FinanceProvider({ children }) {
   const [importCounts, setImportCounts] = useState({ uid: null, counts: {} });
   const [dismissedIds, setDismissedIds] = useState(() => new Set());
   const [uid, setUid] = useState(null);
+  // The user's accounts (SCRUM-167), live from the top-level accounts collection: { uid, list }
+  const [accountState, setAccountState] = useState({ uid: null, list: [] });
   const [profile, setProfile] = useState(PROFILE);
   const [customCategories, setCustomCategories] = useState([]);
   // users/{uid}/budgetMonths: one record per month whose budget was set (SCRUM-137)
@@ -313,6 +316,107 @@ export default function FinanceProvider({ children }) {
       }
     );
   }, [uid]);
+
+  // Live accounts (SCRUM-167): every account of this user, deleted ones included so old
+  // transactions can still say "Deleted account" and a removed account can be restored.
+  // The query has to filter by userId or the rules refuse it.
+  useEffect(() => {
+    if (!uid) return undefined;
+    return onSnapshot(
+      query(collection(db, "accounts"), where("userId", "==", uid)),
+      (snap) => setAccountState({ uid, list: snap.docs.map((d) => toAccount(d.id, d.data())) }),
+      (err) => {
+        console.error("Could not load accounts:", err.code, err.message);
+        setAccountState({ uid, list: [] });
+      }
+    );
+  }, [uid]);
+  const allAccounts = useMemo(() => (accountState.uid === uid ? accountState.list : []), [accountState, uid]);
+  // The accounts the user added, not deleted, by name
+  const userAccounts = useMemo(
+    () => allAccounts.filter((a) => !a.deleted).sort((a, b) => a.name.localeCompare(b.name)),
+    [allAccounts]
+  );
+  const deletedAccounts = useMemo(
+    () => allAccounts.filter((a) => a.deleted).sort((a, b) => (b.deletedAt ?? "").localeCompare(a.deletedAt ?? "")),
+    [allAccounts]
+  );
+  // The pickers list the user's accounts. Until they add one, the two built-in accounts stay
+  // (older transactions and statements use their ids, acct-checking and acct-credit).
+  const accounts = userAccounts.length > 0 ? userAccounts : ACCOUNTS;
+  /** Any account by id: the user's (deleted ones too), or one of the two built-in ones. */
+  const accountById = useCallback(
+    (id) => allAccounts.find((a) => a.id === id) ?? ACCOUNTS.find((a) => a.id === id) ?? null,
+    [allAccounts]
+  );
+
+  /** Adds an account. Throws an Error with a message to show when the input or the save is bad. */
+  const addAccount = useCallback(
+    async (input) => {
+      if (!uid) throw new Error("You need to be logged in.");
+      const checked = cleanAccountInput(input);
+      if (!checked.ok) throw new Error(checked.error);
+      try {
+        await addDoc(collection(db, "accounts"), {
+          userId: uid,
+          ...checked.values,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          deletedAt: null,
+          deletedBy: null,
+          purgeAfter: null,
+        });
+      } catch (err) {
+        console.error("Could not add account:", err.code, err.message);
+        throw new Error("We couldn't save this account. Please try again.");
+      }
+    },
+    [uid]
+  );
+
+  /** Changes the bank, last 4 digits or nickname. The type never changes (a different kind is a new account). */
+  const updateAccount = useCallback(
+    async (id, input, type) => {
+      if (!uid) throw new Error("You need to be logged in.");
+      const checked = cleanAccountInput({ ...input, type });
+      if (!checked.ok) throw new Error(checked.error);
+      const { institution, last4, nickname } = checked.values;
+      try {
+        await updateDoc(doc(db, "accounts", id), { institution, last4, nickname, updatedAt: serverTimestamp() });
+      } catch (err) {
+        console.error("Could not change account:", err.code, err.message);
+        throw new Error("We couldn't save this account. Please try again.");
+      }
+    },
+    [uid]
+  );
+
+  /** Removes an account (a soft delete). Its transactions and statements stay and show "Deleted account". */
+  const removeAccount = useCallback(
+    async (id) => {
+      if (!uid) throw new Error("You need to be logged in.");
+      try {
+        await updateDoc(doc(db, "accounts", id), softDeleteFields(uid));
+      } catch (err) {
+        console.error("Could not remove account:", err.code, err.message);
+        throw new Error("We couldn't remove this account. Please try again.");
+      }
+    },
+    [uid]
+  );
+
+  const restoreAccount = useCallback(
+    async (id) => {
+      if (!uid) throw new Error("You need to be logged in.");
+      try {
+        await updateDoc(doc(db, "accounts", id), { deletedAt: null, deletedBy: null, purgeAfter: null, updatedAt: serverTimestamp() });
+      } catch (err) {
+        console.error("Could not restore account:", err.code, err.message);
+        throw new Error("We couldn't restore this account. Please try again.");
+      }
+    },
+    [uid]
+  );
 
   // Live profile and settings from users/{uid} (SCRUM-84): the name and the monthly
   // income saved on Settings. Until it arrives, the name and email from Auth are used.
@@ -814,7 +918,14 @@ export default function FinanceProvider({ children }) {
   const value = useMemo(
     () => ({
       categories,
-      accounts: ACCOUNTS,
+      accounts,
+      userAccounts,
+      deletedAccounts,
+      accountById,
+      addAccount,
+      updateAccount,
+      removeAccount,
+      restoreAccount,
       currentMonth: CURRENT_MONTH,
       previousMonth: PREVIOUS_MONTH,
       transactions,
@@ -850,6 +961,14 @@ export default function FinanceProvider({ children }) {
     }),
     [
       categories,
+      accounts,
+      userAccounts,
+      deletedAccounts,
+      accountById,
+      addAccount,
+      updateAccount,
+      removeAccount,
+      restoreAccount,
       transactions,
       transactionsLoading,
       transactionsError,

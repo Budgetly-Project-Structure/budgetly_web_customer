@@ -275,6 +275,7 @@ export default function ImportPage() {
     statementsLoading,
     statementsError,
     accounts,
+    accountById,
     categories,
     deletedTransactions,
     deletedBudgets,
@@ -384,7 +385,7 @@ export default function ImportPage() {
   }
 
   /** Looks up an account by id (for showing its name + masked number in history). */
-  const acctById = (id) => accounts.find((a) => a.id === id);
+  const acctById = accountById;
 
   return (
     <div className="space-y-6">

@@ -5,7 +5,8 @@
  *   - Profile and income: your display name (email is read-only) and your monthly
  *     income, used as the budget for a month with no deposits (SCRUM-84). Saved
  *     to users/{uid} in Firestore and to your Firebase Auth name.
- *   - Accounts: the bank accounts you've imported, with masked numbers (•••• 4521)
+ *   - Accounts (SCRUM-167): your checking accounts and credit cards. Add, rename and remove
+ *     them (a removed one can be brought back); only the last 4 digits are ever kept
  *   - Data permissions: switches for the same three permissions as the consent screen
  *   - Danger zone: "Delete my data" with a confirm step
  *
@@ -17,6 +18,7 @@ import { Card, PageHeader, buttonStyles, inputStyles } from "../components/ui";
 import { useToast } from "../components/ToastContext";
 import { useFinance } from "../data/FinanceContext";
 import { maskAccount } from "../lib/format";
+import { ACCOUNT_TYPES, INSTITUTION_MAX, NICKNAME_MAX, cleanAccountInput } from "../lib/accounts";
 
 // Mirrors the items on the consent screen so users can review/revoke them later.
 const PERMISSIONS = [
@@ -147,9 +149,222 @@ function ProfileForm({ profile, onSave, status, setStatus }) {
   );
 }
 
+/**
+ * Add an account, or change one. The type can only be chosen when adding: a different
+ * kind of account is a new account.
+ *
+ * @param {Object} [props.account]  The account being changed; none = adding
+ * @param {(input: {type: string, institution: string, last4: string, nickname: string}) => Promise<void>} props.onSave
+ * @param {() => void} props.onCancel
+ */
+function AccountForm({ account, onSave, onCancel }) {
+  const [type, setType] = useState(account?.type ?? "checking");
+  const [institution, setInstitution] = useState(account?.institution ?? "");
+  const [last4, setLast4] = useState(account?.last4 ?? "");
+  const [nickname, setNickname] = useState(account?.nickname ?? "");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  return (
+    <form
+      className="px-5 py-4 space-y-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const checked = cleanAccountInput({ type, institution, last4, nickname });
+        if (!checked.ok) return setError(checked.error);
+        setError("");
+        setSaving(true);
+        try {
+          await onSave({ type, institution, last4, nickname });
+        } catch (err) {
+          setError(err.message);
+          setSaving(false);
+        }
+      }}
+    >
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <label className="block text-xs text-textMuted">
+          Type
+          <select value={type} disabled={Boolean(account)} onChange={(e) => setType(e.target.value)} className={`${inputStyles} w-full mt-1 disabled:opacity-60`}>
+            {ACCOUNT_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="block text-xs text-textMuted">
+          Bank or card company
+          <input value={institution} maxLength={INSTITUTION_MAX} placeholder="Chase" onChange={(e) => setInstitution(e.target.value)} className={`${inputStyles} w-full mt-1`} />
+        </label>
+        <label className="block text-xs text-textMuted">
+          Last 4 digits (optional)
+          <input
+            value={last4}
+            maxLength={4}
+            inputMode="numeric"
+            placeholder="4521"
+            onChange={(e) => setLast4(e.target.value.replace(/\D/g, ""))}
+            className={`${inputStyles} w-full mt-1 font-mono`}
+            aria-describedby="last4-help"
+          />
+          <span id="last4-help" className="block mt-1">Only the last 4 digits. Never enter your full account number.</span>
+        </label>
+        <label className="block text-xs text-textMuted">
+          Nickname (optional)
+          <input value={nickname} maxLength={NICKNAME_MAX} placeholder="Joint checking" onChange={(e) => setNickname(e.target.value)} className={`${inputStyles} w-full mt-1`} />
+        </label>
+      </div>
+      {error && (
+        <p className="text-sm text-danger" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="flex items-center gap-3">
+        <button type="submit" disabled={saving} className={buttonStyles.primary}>
+          {saving ? "Saving…" : account ? "Save changes" : "Add account"}
+        </button>
+        <button type="button" onClick={onCancel} className="text-sm text-textMuted hover:text-textLight">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * The Accounts card (SCRUM-167): list, add, change, remove, and bring a removed one back.
+ * Removing keeps the account's transactions; they show "Deleted account".
+ */
+function AccountsCard() {
+  const { userAccounts, deletedAccounts, addAccount, updateAccount, removeAccount, restoreAccount } = useFinance();
+  const { showToast } = useToast();
+  // "new", an account id being changed, or null
+  const [formFor, setFormFor] = useState(null);
+  const [confirmId, setConfirmId] = useState(null);
+  const [error, setError] = useState("");
+
+  /** Runs a change and shows its result; a failure shows its message under the list. */
+  async function run(action, doneMessage) {
+    setError("");
+    try {
+      await action();
+      showToast({ message: doneMessage });
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <Card
+      title="Accounts"
+      padded={false}
+      action={
+        formFor !== "new" && (
+          <button onClick={() => setFormFor("new")} className={buttonStyles.secondary}>
+            Add account
+          </button>
+        )
+      }
+    >
+      {formFor === "new" && (
+        <div className="border-t border-line">
+          <AccountForm
+            onCancel={() => setFormFor(null)}
+            onSave={async (input) => {
+              await addAccount(input);
+              setFormFor(null);
+              showToast({ message: "Account added" });
+            }}
+          />
+        </div>
+      )}
+      <ul className="divide-y divide-line border-t border-line">
+        {userAccounts.length === 0 && formFor !== "new" && (
+          <li className="px-5 py-4 text-sm text-textMuted">
+            You haven't added an account yet. Add your checking account or credit card so each statement is filed under the right one.
+          </li>
+        )}
+        {userAccounts.map((a) =>
+          formFor === a.id ? (
+            <li key={a.id}>
+              <AccountForm
+                account={a}
+                onCancel={() => setFormFor(null)}
+                onSave={async (input) => {
+                  await updateAccount(a.id, input, a.type);
+                  setFormFor(null);
+                  showToast({ message: "Account saved" });
+                }}
+              />
+            </li>
+          ) : (
+            <li key={a.id} className="px-5 py-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-textLight truncate">{a.name}</p>
+                <p className="text-xs text-textMuted">{a.type === "credit" ? "Credit card" : "Checking account"}</p>
+              </div>
+              <span className="font-mono text-sm text-textMuted">{maskAccount(a.last4)}</span>
+              {confirmId === a.id ? (
+                <span className="flex items-center gap-3">
+                  <span className="text-sm text-danger">Remove it? Its transactions stay.</span>
+                  <button
+                    onClick={async () => {
+                      setConfirmId(null);
+                      await run(() => removeAccount(a.id), "Account removed");
+                    }}
+                    className={buttonStyles.danger}
+                  >
+                    Remove
+                  </button>
+                  <button onClick={() => setConfirmId(null)} className="text-sm text-textMuted hover:text-textLight">
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <span className="flex items-center gap-3">
+                  <button onClick={() => setFormFor(a.id)} className={buttonStyles.ghost} aria-label={`Change ${a.name}`}>
+                    Change
+                  </button>
+                  <button onClick={() => setConfirmId(a.id)} className="text-sm text-textMuted hover:text-danger" aria-label={`Remove ${a.name}`}>
+                    Remove
+                  </button>
+                </span>
+              )}
+            </li>
+          )
+        )}
+      </ul>
+      {error && (
+        <p className="px-5 py-3 text-sm text-danger border-t border-line" role="alert">
+          {error}
+        </p>
+      )}
+      {deletedAccounts.length > 0 && (
+        <div className="border-t border-line">
+          <p className="px-5 pt-3 text-xs font-medium text-textMuted">Removed accounts</p>
+          <ul>
+            {deletedAccounts.map((a) => (
+              <li key={a.id} className="px-5 py-2 flex items-center justify-between gap-3">
+                <span className="text-sm text-textMuted">
+                  {a.institution} {a.type === "credit" ? "card" : "checking"}
+                </span>
+                <button onClick={() => run(() => restoreAccount(a.id), "Account restored")} className={buttonStyles.ghost}>
+                  Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="px-5 py-3 text-xs text-textMuted border-t border-line">
+        Only the last 4 digits are kept, never the full account number. A removed account can be restored for 30 days.
+      </p>
+    </Card>
+  );
+}
+
 /** Settings page component. */
 export default function SettingsPage() {
-  const { profile, saveProfile, accounts } = useFinance();
+  const { profile, saveProfile } = useFinance();
   // perms = the three permission switches; confirmDelete = second step of the delete button
   const [perms, setPerms] = useState({ statementData: true, storage: true, aiCategorization: true });
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -171,19 +386,7 @@ export default function SettingsPage() {
         />
       </Card>
 
-      <Card title="Accounts" padded={false}>
-        <ul className="divide-y divide-line border-t border-line">
-          {accounts.map((a) => (
-            <li key={a.id} className="px-5 py-3 flex items-center justify-between">
-              <span className="text-sm text-textLight">{a.name}</span>
-              <span className="font-mono text-sm text-textMuted">{maskAccount(a.last4)}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="px-5 py-3 text-xs text-textMuted border-t border-line">
-          Accounts are added automatically when you import a statement.
-        </p>
-      </Card>
+      <AccountsCard />
 
       <Card title="Data permissions" padded={false}>
         <ul className="divide-y divide-line border-t border-line">
