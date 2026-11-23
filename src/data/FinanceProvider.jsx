@@ -25,15 +25,15 @@
  * A limit is monthly, so it applies to every month; a new user has none. source is "auto"
  * when Auto budget set it and "user" when the user typed it in (older budgets have none = "user").
  * Each month the budget sets itself once (SCRUM-137, planMonthlyBudget in lib/finance.js):
- * users/{uid}/budgetMonths/{YYYY-MM} = { month, auto, savings, createdAt } records that it
+ * users/{uid}/budgetMonths/{YYYY-MM} = { auto, savings, createdAt } records that it
  * happened (and the savings kept), so it runs only once per month even with two tabs open.
  * The profile (name, email, and the monthly income from Settings) is live from
- * users/{uid} (SCRUM-84); the name and email from Firebase Auth fill in until it loads. Categories the user makes are kept in
+ * users/{uid} (SCRUM-84); the email from Firebase Auth fills in until it loads. Categories the user makes are kept in
  * this browser (localStorage) until they move to Firestore too. The plan is to swap them for Firestore
  * here too; the pages won't need to change.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { onAuthStateChanged, updateProfile } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import {
   Timestamp,
   addDoc,
@@ -217,7 +217,8 @@ export default function FinanceProvider({ children }) {
           await updateDoc(ref, { deletedAt: null, deletedBy: null, purgeAfter: null, updatedAt: serverTimestamp() });
           deletedBudgetIds.current.delete(categoryId);
         }
-        await setDoc(ref, { categoryId, limitCents, source, updatedAt: serverTimestamp() });
+        // The document id is the category, so categoryId isn't saved again (SCRUM-146)
+        await setDoc(ref, { limitCents, source, updatedAt: serverTimestamp() });
         return true;
       } catch (err) {
         console.error("Could not save budget:", err.code, err.message);
@@ -325,8 +326,8 @@ export default function FinanceProvider({ children }) {
   }, [uid]);
 
   /**
-   * Saves the name and monthly income from Settings to users/{uid}, and the name
-   * to the Firebase Auth profile too. monthlyIncome is dollars, or null to clear it.
+   * Saves the name and monthly income from Settings to users/{uid}. The name lives only
+   * there (SCRUM-146), not in the Firebase Auth profile. monthlyIncome is dollars, or null to clear it.
    * The live listener above puts the new values on screen.
    * Throws an Error with a message that can be shown to the user.
    */
@@ -336,9 +337,6 @@ export default function FinanceProvider({ children }) {
       try {
         // merge: only these two fields change (the rules allow nothing else)
         await setDoc(doc(db, "users", uid), { displayName, monthlyIncome }, { merge: true });
-        if (auth.currentUser && auth.currentUser.displayName !== displayName) {
-          await updateProfile(auth.currentUser, { displayName });
-        }
       } catch (err) {
         console.error("Could not save profile:", err.code, err.message);
         throw new Error("We couldn't save your settings. Please try again.");
@@ -379,7 +377,7 @@ export default function FinanceProvider({ children }) {
         if (monthMarkers?.some((m) => m.month === month)) {
           await updateDoc(ref, { savings, updatedAt: serverTimestamp() });
         } else {
-          await setDoc(ref, { month, auto: false, savings, createdAt: serverTimestamp() });
+          await setDoc(ref, { auto: false, savings, createdAt: serverTimestamp() }); // the doc id is the month (SCRUM-146)
         }
       } catch (err) {
         console.error("Could not save the month's savings:", err.code, err.message);
@@ -439,7 +437,8 @@ export default function FinanceProvider({ children }) {
         if (user) {
           setProfile((p) => ({
             ...p,
-            displayName: user.displayName || user.email?.split("@")[0] || "",
+            // Until users/{uid} loads, show the start of the email (the name lives in users/{uid} only)
+            displayName: user.email?.split("@")[0] || "",
             email: user.email ?? "",
           }));
         } else {
@@ -505,8 +504,7 @@ export default function FinanceProvider({ children }) {
     (async () => {
       try {
         await setDoc(doc(db, "users", uid, "budgetMonths", CURRENT_MONTH), {
-          month: CURRENT_MONTH,
-          auto: true,
+          auto: true, // the doc id is the month (SCRUM-146)
           savings: suggestion.savings,
           createdAt: serverTimestamp(),
         });
@@ -571,7 +569,6 @@ export default function FinanceProvider({ children }) {
           category,
           categorySource: "user",
           categoryConfidence: 1,
-          isUserCorrected: true,
           accountId: accountId ?? null,
           sourceStatementId: null,
           source: "manual",
