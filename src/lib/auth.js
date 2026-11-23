@@ -11,7 +11,6 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  updateProfile,
 } from "firebase/auth";
 import { doc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "./firebase";
@@ -49,12 +48,10 @@ function friendlyError(err) {
 export async function signUp({ name, email, password }) {
   try {
     const cred = await createUserWithEmailAndPassword(auth, email.trim(), password);
-    await updateProfile(cred.user, { displayName: name.trim() });
 
-    // Field names must match the Firestore rules (SCRUM-15):
-    // only email, displayName, createdAt, consentAcceptedAt are allowed.
+    // The name lives only here, in users/{uid}, and the email only in Firebase Auth
+    // (SCRUM-146). Field names must match the Firestore rules (SCRUM-15).
     await setDoc(doc(db, "users", cred.user.uid), {
-      email: cred.user.email,
       displayName: name.trim(),
       createdAt: serverTimestamp(),
     });
