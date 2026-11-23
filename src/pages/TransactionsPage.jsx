@@ -153,6 +153,7 @@ export default function TransactionsPage() {
     transactionsError,
     categories,
     accounts,
+    accountById,
     currentMonth,
     previousMonth,
     updateTransactionCategory,
@@ -200,7 +201,8 @@ export default function TransactionsPage() {
 
   // Lookups from ids to full objects (for icons, labels, masked account numbers)
   const catById = (id) => categories.find((c) => c.id === id);
-  const acctById = (id) => accounts.find((a) => a.id === id);
+  // Any account by id, including a deleted one (shown as "Deleted account", SCRUM-167)
+  const acctById = accountById;
 
   // Months for the Month filter: every month that has transactions, plus the current and
   // previous month, newest first
